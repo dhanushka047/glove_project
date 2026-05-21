@@ -20,12 +20,14 @@
 #include "mpu6050_helper.h"
 
 // ═══════════════════════════════════════════════════════════════
-// ▶  USER CONFIGURATION — update before flashing
+// ▶  ACCESS POINT CONFIG
 // ═══════════════════════════════════════════════════════════════
-const char* WIFI_SSID     = "Dineth's A56";       // ← change
-const char* WIFI_PASSWORD = "12345678";   // ← change
-const char* SERVER_HOST   = "10.224.249.202";        // ← Node.js server IP
-const int   SERVER_PORT   = 3000;
+#define AP_SSID      "FC_Project_v1"   // hotspot name (no password)
+#define AP_CHANNEL   1
+
+// Laptop gets 192.168.4.2 from ESP32 DHCP — Node.js server runs there
+const char* SERVER_HOST = "192.168.4.2";
+const int   SERVER_PORT = 3000;
 
 // ═══════════════════════════════════════════════════════════════
 // ▶  Pin Definitions
@@ -499,19 +501,23 @@ void setup() {
   // Button
   pinMode(PIN_BUTTON, INPUT_PULLUP);
 
-  // WiFi
-  Serial.printf("[WiFi] Connecting to: %s\n", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  uint8_t attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-    delay(500); Serial.print("."); attempts++;
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("\n[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-  } else {
-    Serial.println("\n[WiFi] FAILED — running offline (library still works)");
-  }
+  // ── Access Point mode ──────────────────────────────────
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID);           // open network, no password
+  IPAddress apIP = WiFi.softAPIP();
+
+  Serial.println();
+  Serial.println("  ╔══════════════════════════════════════╗");
+  Serial.println("  ║  📶  Hotspot: FC_Project_v1          ║");
+  Serial.println("  ║  🔓  Password: (none)                ║");
+  Serial.printf( "  ║  📍  ESP32 IP : %-21s║\n", (apIP.toString() + "   ").c_str());
+  Serial.printf( "  ║  💻  Laptop IP: %-21s║\n", (String(SERVER_HOST) + "   ").c_str());
+  Serial.println("  ╠══════════════════════════════════════╣");
+  Serial.println("  ║  1. Connect laptop to FC_Project_v1  ║");
+  Serial.println("  ║  2. Run  ./start.sh  on laptop       ║");
+  Serial.printf( "  ║  3. Open http://%s:%d     ║\n", SERVER_HOST, SERVER_PORT);
+  Serial.println("  ╚══════════════════════════════════════╝");
+  Serial.println();
 
   // WebSocket
   wsClient.begin(SERVER_HOST, SERVER_PORT, "/");
