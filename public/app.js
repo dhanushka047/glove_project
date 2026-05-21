@@ -186,6 +186,12 @@ function onSensorData(data) {
   APP.yaw   = data.yaw   ?? APP.yaw;
   APP.accel = data.accel || APP.accel;
 
+  // Auto-mark ESP32 online when data arrives (handles missed identify)
+  if (!APP.esp32Ok) {
+    APP.esp32Ok = true;
+    updateESP32Dot(true);
+  }
+
   // Rolling detection buffer — accumulate N live samples, then match
   APP.detectionBuf.push([...APP.flex]);
   if (APP.detectionBuf.length > APP.detectionBufSize) APP.detectionBuf.shift();
@@ -335,7 +341,7 @@ function makeTextTexture(text, baseColor) {
 }
 
 function updateCube(pitch, roll, yaw) {
-  if (!THREE_cube || !APP.esp32Ok) return;
+  if (!THREE_cube) return;   // only skip if Three.js not ready
   THREE_cube.rotation.x =  pitch * (Math.PI / 180);
   THREE_cube.rotation.z =  roll  * (Math.PI / 180);
   THREE_cube.rotation.y =  yaw   * (Math.PI / 180);

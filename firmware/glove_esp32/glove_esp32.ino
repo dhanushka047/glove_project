@@ -553,4 +553,14 @@ void loop() {
     lastSendTime = now;
     sendSensorData();
   }
+
+  // Debug print every 1 second — remove after testing
+  static unsigned long lastDebug = 0;
+  if (now - lastDebug >= 1000) {
+    lastDebug = now;
+    Serial.printf("[DBG] P=%.1f R=%.1f Y=%.1f | Flex: %d %d %d %d %d | WS:%s\n",
+      curPitch, curRoll, curYaw,
+      (int)curFlex[0], (int)curFlex[1], (int)curFlex[2], (int)curFlex[3], (int)curFlex[4],
+      wsConnected ? "OK" : "X");
+  }
 }
