@@ -492,7 +492,8 @@ void setup() {
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(400000);   // 400 kHz fast mode
   if (!imu.begin()) {
-    Serial.println("[IMU] MPU6050 NOT found — check wiring!");
+    Serial.println("[IMU] !! MPU6050 FAILED — halting. Check SDA=GPIO8 SCL=GPIO9 !!");
+    // Don't halt — still run WS so user can see error on dashboard
   }
 
   // ADC: 12-bit, 11dB (0–3.6V range)
