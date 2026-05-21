@@ -227,7 +227,7 @@ void readSensors() {
   curFlex[2] = (float)analogRead(PIN_FLEX_MIDDLE);
   curFlex[3] = (float)analogRead(PIN_FLEX_RING);
   curFlex[4] = (float)analogRead(PIN_FLEX_PINKY);
-  imu.update();
+  // imu.update() is called every loop() cycle for filter accuracy
   curPitch = imu.pitch;
   curRoll  = imu.roll;
   curYaw   = imu.yaw;
@@ -537,6 +537,7 @@ void setup() {
 // ▶  loop()
 // ═══════════════════════════════════════════════════════════════
 void loop() {
+  imu.update();         // must run every cycle — complementary filter accuracy
   wsClient.loop();
   handleButton();
 
