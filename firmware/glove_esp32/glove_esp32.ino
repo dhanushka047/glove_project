@@ -22,20 +22,20 @@
 // ═══════════════════════════════════════════════════════════════
 // ▶  USER CONFIGURATION — update before flashing
 // ═══════════════════════════════════════════════════════════════
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";       // ← change
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";   // ← change
-const char* SERVER_HOST   = "192.168.1.100";         // ← Node.js server IP
+const char* WIFI_SSID     = "Dineth's A56";       // ← change
+const char* WIFI_PASSWORD = "12345678";   // ← change
+const char* SERVER_HOST   = "10.224.249.202";        // ← Node.js server IP
 const int   SERVER_PORT   = 3000;
 
 // ═══════════════════════════════════════════════════════════════
 // ▶  Pin Definitions
 // ═══════════════════════════════════════════════════════════════
 // Flex sensor ADC pins (ESP32-S3 uses GPIO numbers)
-#define PIN_FLEX_THUMB   1   // A1
-#define PIN_FLEX_INDEX   3   // A3
-#define PIN_FLEX_MIDDLE  5   // A5
-#define PIN_FLEX_RING    7   // A7
-#define PIN_FLEX_PINKY   2   // A2
+#define PIN_FLEX_THUMB   A1   // A1
+#define PIN_FLEX_INDEX   A3   // A3
+#define PIN_FLEX_MIDDLE  A5   // A5
+#define PIN_FLEX_RING    A7   // A7
+#define PIN_FLEX_PINKY   A2   // A2
 
 // MPU6050 I2C
 #define PIN_SDA          8
