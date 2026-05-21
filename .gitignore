@@ -1,0 +1,24 @@
+# Node.js
+server/node_modules/
+server/data/signs.json
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build artifacts
+dist/
+build/
+
+# Arduino / IDE
+*.hex
+*.elf
+*.map

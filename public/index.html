@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SignGlove — Sign Language Glove Dashboard</title>
+  <meta name="description" content="ESP32-S3 Sign Language Glove: record, calibrate, test, and export hand signs with live 3D orientation and flex sensor visualization." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════════════════════ -->
+<header class="header" role="banner">
+  <div class="header-brand">
+    <div class="brand-logo" aria-hidden="true">🧤</div>
+    <div class="brand-text">
+      <span class="brand-name">SignGlove</span>
+      <span class="brand-sub">Sign Language Detection System</span>
+    </div>
+  </div>
+
+  <div class="header-center" id="sign-ticker" aria-live="polite">
+    <span class="ticker-label">Detected:</span>
+    <span class="ticker-value" id="header-detected">—</span>
+  </div>
+
+  <div class="header-right">
+    <div class="status-pill" id="esp32-status-pill" title="ESP32 connection status">
+      <span class="status-dot" id="esp32-dot"></span>
+      <span id="esp32-label">ESP32 Offline</span>
+    </div>
+    <div class="status-pill server-pill" id="server-status-pill" title="Server connection status">
+      <span class="status-dot" id="server-dot"></span>
+      <span id="server-label">Server…</span>
+    </div>
+    <button class="btn btn-ghost" id="connect-btn" aria-label="Open connection settings">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      Connect
+    </button>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════
+     LAYOUT: SIDEBAR + MAIN
+═══════════════════════════════════════════════════════════ -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" role="navigation" aria-label="Main navigation">
+    <nav class="nav">
+      <button class="nav-item active" id="nav-dashboard" data-view="dashboard" aria-current="page">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Dashboard</span>
+      </button>
+      <button class="nav-item" id="nav-calibrate" data-view="calibrate">
+        <span class="nav-icon">🎯</span>
+        <span class="nav-label">Calibrate</span>
+      </button>
+      <button class="nav-item" id="nav-library" data-view="library">
+        <span class="nav-icon">📚</span>
+        <span class="nav-label">Library</span>
+        <span class="nav-badge" id="library-count-badge">0</span>
+      </button>
+      <button class="nav-item" id="nav-test" data-view="test">
+        <span class="nav-icon">🔬</span>
+        <span class="nav-label">Test Mode</span>
+      </button>
+      <button class="nav-item" id="nav-export" data-view="export">
+        <span class="nav-icon">📤</span>
+        <span class="nav-label">Export</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost btn-sm sidebar-reset-yaw" id="reset-yaw-btn" title="Reset IMU yaw to 0°">↺ Reset Yaw</button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main" role="main">
+
+    <!-- ── DASHBOARD ───────────────────────────────────────── -->
+    <section id="view-dashboard" class="view active" aria-label="Live Dashboard">
+      <div class="view-header">
+        <h1 class="view-title">Live Dashboard</h1>
+        <p class="view-sub">Real-time sensor data from your glove</p>
+      </div>
+
+      <div class="dashboard-grid">
+
+        <!-- 3D Orientation cube -->
+        <div class="glass-card cube-card">
+          <div class="card-header">
+            <h2 class="card-title">Hand Orientation</h2>
+            <span class="card-chip">MPU6050</span>
+          </div>
+          <div id="cube-container" aria-label="3D orientation visualization"></div>
+          <div class="euler-row">
+            <div class="euler-item">
+              <label class="euler-label">Pitch</label>
+              <span class="euler-val" id="val-pitch">0.0°</span>
+            </div>
+            <div class="euler-item">
+              <label class="euler-label">Roll</label>
+              <span class="euler-val" id="val-roll">0.0°</span>
+            </div>
+            <div class="euler-item">
+              <label class="euler-label">Yaw</label>
+              <span class="euler-val" id="val-yaw">0.0°</span>
+            </div>
+          </div>
+          <div class="accel-row" id="accel-row">
+            <span class="accel-chip">Ax: <b id="val-ax">0.00</b>g</span>
+            <span class="accel-chip">Ay: <b id="val-ay">0.00</b>g</span>
+            <span class="accel-chip">Az: <b id="val-az">0.00</b>g</span>
+          </div>
+        </div>
+
+        <!-- Flex sensors -->
+        <div class="glass-card flex-card">
+          <div class="card-header">
+            <h2 class="card-title">Flex Sensors</h2>
+            <span class="card-chip">5-finger</span>
+          </div>
+          <div class="flex-bars" id="flex-bars" role="group" aria-label="Flex sensor readings"></div>
+          <div class="detected-banner" id="detected-banner" aria-live="polite">
+            <span class="detected-tag">DETECTED</span>
+            <span class="detected-letter" id="detected-letter">A</span>
+          </div>
+        </div>
+
+        <!-- Signal quality / stats -->
+        <div class="glass-card stats-card">
+          <div class="card-header">
+            <h2 class="card-title">Statistics</h2>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-num" id="stat-signs">0</span>
+              <span class="stat-lbl">Signs Saved</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" id="stat-fps">—</span>
+              <span class="stat-lbl">Data Rate</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" id="stat-pitch-max">—</span>
+              <span class="stat-lbl">Peak Pitch</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-num" id="stat-detects">0</span>
+              <span class="stat-lbl">Total Detections</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── CALIBRATE ─────────────────────────────────────────── -->
+    <section id="view-calibrate" class="view" aria-label="Calibration Wizard">
+      <div class="view-header">
+        <h1 class="view-title">Calibrate</h1>
+        <p class="view-sub">Record hand signs step by step</p>
+      </div>
+
+      <div class="wizard-wrap">
+
+        <!-- Progress bar -->
+        <div class="wizard-progress" id="wizard-progress">
+          <div class="wp-step done"  id="wp1"><span>1</span><label>Label</label></div>
+          <div class="wp-line"></div>
+          <div class="wp-step"       id="wp2"><span>2</span><label>Pose</label></div>
+          <div class="wp-line"></div>
+          <div class="wp-step"       id="wp3"><span>3</span><label>Record</label></div>
+          <div class="wp-line"></div>
+          <div class="wp-step"       id="wp4"><span>4</span><label>Done</label></div>
+        </div>
+
+        <!-- Step 1 — Enter label -->
+        <div class="calib-step" id="calib-step-1">
+          <div class="glass-card calib-card">
+            <h2>What sign do you want to record?</h2>
+            <p class="hint-text">Type any letter, digit, or short word (max 7 chars).</p>
+            <div class="input-row">
+              <input type="text" id="calib-label-input" class="text-input big-input" placeholder="e.g. A" maxlength="7" autocomplete="off" aria-label="Sign label" />
+              <button class="btn btn-primary btn-lg" id="calib-start-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                Start
+              </button>
+            </div>
+            <div class="session-config-row">
+              <div class="form-group">
+                <label class="form-label" for="samples-per-session">Samples / session</label>
+                <input type="number" id="samples-per-session" class="text-input num-input" value="20" min="5" max="200" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="sessions-target">Sessions to record</label>
+                <input type="number" id="sessions-target" class="text-input num-input" value="3" min="1" max="20" />
+              </div>
+            </div>
+            <div class="quick-picker">
+              <p class="quick-title">Quick pick:</p>
+              <div class="quick-grid" id="quick-grid"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2 — Countdown -->
+        <div class="calib-step hidden" id="calib-step-2">
+          <div class="glass-card calib-card text-center">
+            <h2>Get into position</h2>
+            <p>Hold sign <strong class="sign-highlight" id="calib-lbl-2">?</strong> and keep steady</p>
+            <div class="session-badge" id="session-badge">Session 1 / 3</div>
+            <div class="countdown-ring" id="countdown-ring" aria-live="polite">
+              <svg viewBox="0 0 120 120" class="countdown-svg">
+                <circle cx="60" cy="60" r="52" class="ring-bg"/>
+                <circle cx="60" cy="60" r="52" class="ring-progress" id="ring-arc"
+                        stroke-dasharray="326.73" stroke-dashoffset="0"/>
+              </svg>
+              <span class="countdown-num" id="countdown-num">3</span>
+            </div>
+            <p class="hint-text">Recording begins automatically…</p>
+          </div>
+        </div>
+
+        <!-- Step 3 — Recording -->
+        <div class="calib-step hidden" id="calib-step-3">
+          <div class="glass-card calib-card text-center">
+            <h2 class="recording-title">
+              <span class="rec-dot-anim"></span>
+              Recording <span class="sign-highlight" id="calib-lbl-3">?</span>
+            </h2>
+            <div class="session-badge" id="session-badge-3">Session 1 / 3</div>
+            <p id="calib-progress-txt" class="mono-text">0 / 20 samples</p>
+            <div class="record-progress-bar">
+              <div class="record-progress-fill" id="record-progress-fill"></div>
+            </div>
+            <div class="mini-flex" id="mini-flex-bars"></div>
+          </div>
+        </div>
+
+        <!-- Step 4 — Saved -->
+        <div class="calib-step hidden" id="calib-step-4">
+          <div class="glass-card calib-card text-center">
+            <div class="success-icon" aria-hidden="true">✅</div>
+            <h2>Sign Saved!</h2>
+            <p><strong class="sign-highlight" id="saved-label-display">?</strong> has been recorded.</p>
+            <div class="saved-stats-row" id="saved-stats-row"></div>
+            <div class="calib-done-actions">
+              <button class="btn btn-primary" id="btn-record-another">Record Another</button>
+              <button class="btn btn-outline" id="btn-view-library">View Library</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── LIBRARY ───────────────────────────────────────────── -->
+    <section id="view-library" class="view" aria-label="Sign Library">
+      <div class="view-header">
+        <h1 class="view-title">Sign Library</h1>
+        <p class="view-sub">All recorded hand signs</p>
+      </div>
+
+      <div class="glass-card">
+        <div class="table-toolbar">
+          <input type="text" id="library-search" class="text-input" placeholder="🔍 Search signs…" aria-label="Search library" />
+          <span class="sign-count-badge" id="library-count-display">0 signs</span>
+          <span class="lib-version-badge" id="lib-version-badge" title="Library version">v1</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="library-table" aria-label="Saved signs">
+            <thead>
+              <tr>
+                <th scope="col">Label</th>
+                <th scope="col">Thumb</th>
+                <th scope="col">Index</th>
+                <th scope="col">Middle</th>
+                <th scope="col">Ring</th>
+                <th scope="col">Pinky</th>
+                <th scope="col">Pitch</th>
+                <th scope="col">Roll</th>
+                <th scope="col">Yaw</th>
+                <th scope="col">Sessions</th>
+                <th scope="col">Ver</th>
+                <th scope="col">Saved</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="library-tbody">
+              <tr><td colspan="13" class="empty-row">No signs yet — head to Calibrate!</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── TEST MODE ─────────────────────────────────────────── -->
+    <section id="view-test" class="view" aria-label="Test Mode">
+      <div class="view-header">
+        <h1 class="view-title">Test Mode</h1>
+        <p class="view-sub">Verify your recorded signs in real-time</p>
+      </div>
+
+      <div class="test-layout">
+
+        <!-- Big detection display -->
+        <div class="glass-card test-main-card">
+          <div class="test-big-display" id="test-big-display" aria-live="assertive">
+            <span class="test-dash">—</span>
+          </div>
+          <div class="confidence-wrap">
+            <div class="confidence-track">
+              <div class="confidence-fill" id="conf-fill"></div>
+            </div>
+            <span class="confidence-label" id="conf-label">Confidence: —</span>
+          </div>
+        </div>
+
+        <!-- Recent detections history -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h2 class="card-title">Recent Detections</h2>
+            <button class="btn btn-ghost btn-sm" id="clear-history-btn">Clear</button>
+          </div>
+          <div class="history-list" id="history-list" aria-live="polite"></div>
+        </div>
+
+        <!-- Live sensors in test mode -->
+        <div class="glass-card">
+          <h2 class="card-title">Live Flex Sensors</h2>
+          <div class="flex-bars" id="test-flex-bars" role="group" aria-label="Live flex readings"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── EXPORT ─────────────────────────────────────────────── -->
+    <section id="view-export" class="view" aria-label="Export">
+      <div class="view-header">
+        <h1 class="view-title">Export</h1>
+        <p class="view-sub">Download your sign library in various formats</p>
+      </div>
+
+      <div class="export-grid">
+
+        <div class="glass-card export-card" id="exp-card-csv">
+          <div class="export-icon-wrap gradient-green">📊</div>
+          <h2 class="export-card-title">CSV Data</h2>
+          <p class="export-desc">All sign data + raw samples in CSV format. Ready for Excel, Google Sheets, or ML pipelines.</p>
+          <button class="btn btn-primary" id="btn-export-csv">Download CSV</button>
+        </div>
+
+        <div class="glass-card export-card" id="exp-card-json">
+          <div class="export-icon-wrap gradient-blue">📋</div>
+          <h2 class="export-card-title">JSON Library</h2>
+          <p class="export-desc">Full library as JSON — useful for backups, importing on another machine, or custom apps.</p>
+          <button class="btn btn-primary" id="btn-export-json">Download JSON</button>
+        </div>
+
+        <div class="glass-card export-card" id="exp-card-arduino">
+          <div class="export-icon-wrap gradient-purple">🤖</div>
+          <h2 class="export-card-title">Arduino Library</h2>
+          <p class="export-desc">Export as a C++ header file <code>SignLanguageLib.h</code> — plug directly into any Arduino sketch on any board.</p>
+          <button class="btn btn-primary" id="btn-export-arduino">Download .h File</button>
+        </div>
+
+      </div>
+
+      <!-- Connection settings -->
+      <div class="glass-card settings-card">
+        <div class="card-header">
+          <h2 class="card-title">Connection Settings</h2>
+        </div>
+        <div class="settings-form">
+          <div class="form-group">
+            <label class="form-label" for="ws-url-input">WebSocket Server URL</label>
+            <input type="text" id="ws-url-input" class="text-input" placeholder="ws://192.168.1.100:3000" aria-label="WebSocket server URL" />
+          </div>
+          <button class="btn btn-primary" id="btn-apply-ws">Apply &amp; Reconnect</button>
+        </div>
+        <div class="settings-info">
+          <p>Current URL: <code id="current-ws-url">—</code></p>
+          <p>Browsers connected: <code id="info-browsers">—</code></p>
+          <p>Signs in library: <code id="info-signs">—</code></p>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     CONNECT MODAL
+═══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="connect-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-box glass-card">
+    <h2 class="modal-title" id="modal-title">Connect to Server</h2>
+    <p class="modal-desc">Enter the IP address of the machine running the Node.js server.</p>
+    <div class="form-group">
+      <label class="form-label" for="modal-ip">Server IP Address</label>
+      <input type="text" id="modal-ip" class="text-input" placeholder="192.168.1.100" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="modal-port">Port</label>
+      <input type="text" id="modal-port" class="text-input" value="3000" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="modal-connect">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     TOAST CONTAINER
+═══════════════════════════════════════════════════════════ -->
+<div id="toast-container" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- Scripts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
+<script src="app.js"></script>
+</body>
+</html>
