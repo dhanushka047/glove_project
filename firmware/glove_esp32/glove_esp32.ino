@@ -519,7 +519,11 @@ void setup() {
   wsClient.setReconnectInterval(3000);
   wsClient.enableHeartbeat(10000, 3000, 3);   // ping every 10s
 
-  Serial.println("[SETUP] All systems ready!");
+  Serial.println("─────────────────────────────────");
+  Serial.printf( "  WS Target : ws://%s:%d\n", SERVER_HOST, SERVER_PORT);
+  Serial.printf( "  Dashboard : http://%s:%d\n", SERVER_HOST, SERVER_PORT);
+  Serial.println("─────────────────────────────────");
+  Serial.println("[SETUP] All systems ready! Connecting to server…");
 }
 
 // ═══════════════════════════════════════════════════════════════
