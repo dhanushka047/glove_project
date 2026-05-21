@@ -40,8 +40,8 @@ const int   SERVER_PORT = 3000;
 #define PIN_FLEX_PINKY   A2   // A2
 
 // MPU6050 I2C
-#define PIN_SDA          8
-#define PIN_SCL          9
+#define PIN_SDA          9
+#define PIN_SCL          8
 
 // Button (boot button — LOW when pressed)
 #define PIN_BUTTON       0
