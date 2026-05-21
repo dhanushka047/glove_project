@@ -558,11 +558,15 @@ void loop() {
 
   // Debug print every 1 second — remove after testing
   static unsigned long lastDebug = 0;
+  static uint8_t tick = 0;
   if (now - lastDebug >= 1000) {
     lastDebug = now;
-    Serial.printf("[DBG] P=%.1f R=%.1f Y=%.1f | Flex: %d %d %d %d %d | WS:%s\n",
+    tick = (tick + 1) % 4;
+    const char* spinner = (tick==0)?"-":(tick==1)?"\\":(tick==2)?"|":"/";
+    Serial.printf("[%s] P=%6.1f R=%6.1f Y=%6.1f | Ax=%5.2f Ay=%5.2f Az=%5.2f | WS:%s\n",
+      spinner,
       curPitch, curRoll, curYaw,
-      (int)curFlex[0], (int)curFlex[1], (int)curFlex[2], (int)curFlex[3], (int)curFlex[4],
+      imu.accelX, imu.accelY, imu.accelZ,
       wsConnected ? "OK" : "X");
   }
 }
