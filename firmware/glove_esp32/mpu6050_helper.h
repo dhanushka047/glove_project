@@ -1,13 +1,13 @@
 // =============================================================
-// mpu6050_helper.h — MPU6050 wrapper using MPU6050_light lib
-// Install: Arduino Library Manager → search "MPU6050_light"
-//          Author: rfetick
+// mpu6050_helper.h — MPU6050 wrapper using TinyMPU6050 lib
+// Install: Arduino Library Manager → search "TinyMPU6050"
+//          Author: Gabriel Milan
 // I2C pins: SDA=8, SCL=9  (set in main sketch via Wire.begin)
 // =============================================================
 #pragma once
 
 #include <Wire.h>
-#include <MPU6050_light.h>
+#include <TinyMPU6050.h>
 
 class MPU6050Helper {
 public:
@@ -28,17 +28,13 @@ public:
 
   // ── Initialise ───────────────────────────────────────────
   bool begin() {
-    byte status = _mpu.begin();
-    if (status != 0) {
-      Serial.printf("[IMU] MPU6050 error code: %d\n", status);
-      Serial.println("[IMU] Check wiring: SDA=GPIO8  SCL=GPIO9");
-      return false;
-    }
+    Serial.println("[IMU] Initializing TinyMPU6050...");
+    _mpu.Initialize();
+    
     Serial.println("[IMU] MPU6050 found ✓");
     Serial.println("[IMU] Calibrating — keep glove STILL for 3s...");
-
     delay(1000);   // settle time
-    _mpu.calcOffsets(true, true);   // auto-calibrate accel + gyro
+    _mpu.Calibrate();   // auto-calibrate accel + gyro offsets
 
     Serial.println("[IMU] Calibration done ✓");
     _yawOffset = 0.0f;
@@ -47,24 +43,24 @@ public:
 
   // ── Update (call every loop tick) ────────────────────────
   void update() {
-    _mpu.update();
+    _mpu.Execute();
 
-    pitch  = _mpu.getAngleX();
-    roll   = _mpu.getAngleY();
-    yaw    = _mpu.getAngleZ() - _yawOffset;
+    pitch  = _mpu.GetAngX();
+    roll   = _mpu.GetAngY();
+    yaw    = _mpu.GetAngZ() - _yawOffset;
 
-    accelX = _mpu.getAccX();
-    accelY = _mpu.getAccY();
-    accelZ = _mpu.getAccZ();
+    accelX = _mpu.GetAccX();
+    accelY = _mpu.GetAccY();
+    accelZ = _mpu.GetAccZ();
 
-    gyroX  = _mpu.getGyroX();
-    gyroY  = _mpu.getGyroY();
-    gyroZ  = _mpu.getGyroZ();
+    gyroX  = _mpu.GetGyroX();
+    gyroY  = _mpu.GetGyroY();
+    gyroZ  = _mpu.GetGyroZ();
   }
 
   // ── Reset yaw to zero ────────────────────────────────────
   void resetYaw() {
-    _yawOffset = _mpu.getAngleZ();
+    _yawOffset = _mpu.GetAngZ();
     yaw = 0.0f;
   }
 
