@@ -13,7 +13,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WebSocketsClient.h>   // arduinoWebSockets by Markus Sattler
+#include <WebSocketsClient_Generic.h>  // WebSockets_Generic library (already installed)
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Wire.h>
