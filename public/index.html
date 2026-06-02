@@ -404,6 +404,14 @@
               </label>
             </div>
 
+            <!-- TTS Voice Selector -->
+            <div class="form-group" style="margin-top: 14px; margin-bottom: 14px;">
+              <label class="form-label" for="tts-voice-select">TTS Voice / Model</label>
+              <select id="tts-voice-select" class="text-input" aria-label="TTS Voice Selection">
+                <option value="">Default System Voice</option>
+              </select>
+            </div>
+
             <!-- Hold duration timer slider -->
             <div class="form-group-slider">
               <div class="slider-header">
@@ -426,6 +434,9 @@
             <div class="manual-actions-grid">
               <button class="btn btn-primary" id="btn-speak-sentence">
                 <span>🔊</span> Speak
+              </button>
+              <button class="btn btn-outline" id="btn-enter-sentence">
+                <span>⏎</span> Enter
               </button>
               <button class="btn btn-outline" id="btn-clear-sentence">
                 <span>🗑️</span> Clear

@@ -209,17 +209,17 @@ inline float angleDiff(float a, float b) {
 }
 
 int detectSign(float* flex, float pitch, float roll, float yaw) {
+  (void)yaw; // yaw ignored for gesture matching to be direction-independent
   float bestScore = 1e9f;
   int   bestIdx   = -1;
   for (int i = 0; i < signCount; i++) {
     if (!signLib[i].valid) continue;
     
-    // Check orientation match with wrap-around support
+    // Check orientation match with wrap-around support (Pitch and Roll only)
     float dp = angleDiff(pitch, signLib[i].avg_pitch);
     float dr = angleDiff(roll,  signLib[i].avg_roll);
-    float dy = angleDiff(yaw,   signLib[i].avg_yaw);
     
-    if (dp > signLib[i].angle_tol || dr > signLib[i].angle_tol || dy > signLib[i].angle_tol) {
+    if (dp > signLib[i].angle_tol || dr > signLib[i].angle_tol) {
       continue; // Skip if hand orientation does not match calibrated angles
     }
 
@@ -246,10 +246,20 @@ void readSensors() {
   curFlex[2] = (float)analogRead(PIN_FLEX_MIDDLE);
   curFlex[3] = (float)analogRead(PIN_FLEX_RING);
   curFlex[4] = (float)analogRead(PIN_FLEX_PINKY);
-  // imu.update() is called every loop() cycle for filter accuracy
-  curPitch = imu.pitch;
-  curRoll  = imu.roll;
-  curYaw   = imu.yaw;
+  
+  // Calculate orientation angles (pitch & roll) directly from raw accelerometer values (g's)
+  // to avoid gyro drift and complementary filter latency during height/motion changes.
+  float ax = imu.accelX;
+  float ay = imu.accelY;
+  float az = imu.accelZ;
+  
+  // Guard division by zero or extreme tilts
+  float denominator = sqrtf(ax * ax + az * az);
+  if (denominator < 0.001f) denominator = 0.001f;
+  
+  curPitch = atan2f(ay, denominator) * 180.0f / M_PI;
+  curRoll  = atan2f(-ax, sqrtf(ay * ay + az * az)) * 180.0f / M_PI;
+  curYaw   = imu.yaw; // Keep complementary filtered yaw for visual tracking (e.g. 3D cube)
 }
 
 // ═══════════════════════════════════════════════════════════════

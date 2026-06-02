@@ -11,7 +11,7 @@
 const APP = {
   // Connection
   ws      : null,
-  wsUrl   : `ws://${location.hostname}:${location.port || 3000}`,
+  wsUrl   : localStorage.getItem('glove_ws_url') || `ws://${location.hostname || 'localhost'}:${location.port || 3000}`,
   serverOk: false,
   esp32Ok : false,
 
@@ -82,6 +82,7 @@ function connectWS(url) {
     APP.ws = new WebSocket(APP.wsUrl);
   } catch (e) {
     console.warn('[WS] Cannot create socket:', e.message);
+    updateServerDot('offline');
     scheduleReconnect();
     return;
   }
@@ -91,6 +92,7 @@ function connectWS(url) {
     APP.serverOk = true;
     updateServerDot('online');
     showToast('Connected to server', 'success');
+    localStorage.setItem('glove_ws_url', APP.wsUrl);
     APP.ws.send(JSON.stringify({ type: 'identify', role: 'browser' }));
     document.getElementById('current-ws-url').textContent = APP.wsUrl;
   };
@@ -445,12 +447,11 @@ function detectSignLocally(avgFlex) {
   for (const [label, sign] of Object.entries(APP.library)) {
     if (!Array.isArray(sign.avg_flex)) continue;
 
-    // Check orientation match with wrap-around support
+    // Check orientation match with wrap-around support (Pitch and Roll only)
     const dp = angleDiff(APP.pitch, sign.avg_pitch || 0);
     const dr = angleDiff(APP.roll,  sign.avg_roll || 0);
-    const dy = angleDiff(APP.yaw,   sign.avg_yaw || 0);
 
-    if (dp > (sign.angle_tol || 30) || dr > (sign.angle_tol || 30) || dy > (sign.angle_tol || 30)) {
+    if (dp > (sign.angle_tol || 30) || dr > (sign.angle_tol || 30)) {
       continue; // Skip if hand orientation does not match calibrated angles
     }
 
@@ -559,7 +560,7 @@ function initCalibration() {
   // Action quick pick buttons
   const actionGrid = document.getElementById('action-quick-grid');
   if (actionGrid) {
-    const actions = ['SPACE', 'BACKSPACE', 'RESET', 'HOLD', 'ENTER'];
+    const actions = ['SPACE', 'BACKSPACE', 'RESET', 'HOLD', 'ENTER', 'SPEAK'];
     actions.forEach(act => {
       const btn = document.createElement('button');
       btn.className = 'quick-btn';
@@ -1085,6 +1086,12 @@ function initTypingView() {
   document.getElementById('btn-backspace-sentence').onclick = () => insertBackspace();
   document.getElementById('btn-clear-sentence').onclick     = () => clearTyping();
   document.getElementById('btn-speak-sentence').onclick     = () => speakSentence();
+  document.getElementById('btn-enter-sentence').onclick     = () => {
+    const firstChip = document.querySelector('.suggestion-chip:not(.empty)');
+    if (firstChip) {
+      selectSuggestion(firstChip.textContent, false); // no TTS play on manual enter
+    }
+  };
 
   // Add word to dictionary
   document.getElementById('btn-add-dict-word').onclick = () => {
@@ -1120,6 +1127,42 @@ function initTypingView() {
 
   renderDictWordList();
   updateTypingState();
+  initTTS();
+}
+
+let ttsVoices = [];
+function initTTS() {
+  const select = document.getElementById('tts-voice-select');
+  if (!select) return;
+
+  function populateVoiceList() {
+    if (typeof speechSynthesis === 'undefined') return;
+    ttsVoices = speechSynthesis.getVoices();
+    
+    select.innerHTML = '<option value="">Default System Voice</option>';
+    
+    const savedVoiceName = localStorage.getItem('glove_tts_voice');
+    
+    ttsVoices.forEach(voice => {
+      const option = document.createElement('option');
+      option.textContent = `${voice.name} (${voice.lang})`;
+      option.value = voice.name;
+      if (savedVoiceName === voice.name) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+  }
+
+  populateVoiceList();
+  if (typeof speechSynthesis !== 'undefined' && speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = populateVoiceList;
+  }
+
+  select.onchange = (e) => {
+    localStorage.setItem('glove_tts_voice', e.target.value);
+    showToast(`Voice changed: ${e.target.value || 'Default'}`, 'info');
+  };
 }
 
 function initializeDefaultDict() {
@@ -1195,7 +1238,7 @@ function updateTypingState() {
   syncLCD(text, topMatches);
 }
 
-function selectSuggestion(word) {
+function selectSuggestion(word, playTTS = true) {
   const textarea = document.getElementById('typing-textarea');
   if (!textarea) return;
   const text = textarea.value;
@@ -1209,7 +1252,9 @@ function selectSuggestion(word) {
   textarea.focus();
   
   // TTS speak selected word
-  speakWord(word);
+  if (playTTS) {
+    speakWord(word);
+  }
 
   updateTypingState();
 }
@@ -1219,6 +1264,14 @@ function speakWord(word) {
   if (ttsToggle && ttsToggle.checked && word.trim()) {
     const s = new SpeechSynthesisUtterance(word);
     s.rate = 1.0;
+    
+    // Set custom voice if selected
+    const select = document.getElementById('tts-voice-select');
+    if (select && select.value && typeof speechSynthesis !== 'undefined') {
+      const voice = speechSynthesis.getVoices().find(v => v.name === select.value);
+      if (voice) s.voice = voice;
+    }
+    
     window.speechSynthesis.speak(s);
   }
 }
@@ -1233,6 +1286,14 @@ function speakSentence() {
   }
   const s = new SpeechSynthesisUtterance(sentence);
   s.rate = 1.0;
+  
+  // Set custom voice if selected
+  const select = document.getElementById('tts-voice-select');
+  if (select && select.value && typeof speechSynthesis !== 'undefined') {
+    const voice = speechSynthesis.getVoices().find(v => v.name === select.value);
+    if (voice) s.voice = voice;
+  }
+  
   window.speechSynthesis.speak(s);
 }
 
@@ -1360,9 +1421,18 @@ function handleTypingFrame() {
       } else if (gestureName === 'detection hold' || gestureName === 'hold') {
         APP.typing.isPaused = !APP.typing.isPaused;
         showToast(APP.typing.isPaused ? 'Typing paused' : 'Typing active', 'warning');
-      } else if (gestureName === 'enter') {
+      } else if (gestureName === 'speak') {
         speakSentence();
         showToast('Gesture: Speak Sentence', 'success');
+      } else if (gestureName === 'enter') {
+        const firstChip = document.querySelector('.suggestion-chip:not(.empty)');
+        if (firstChip) {
+          const firstWord = firstChip.textContent;
+          selectSuggestion(firstWord, false); // select 1st suggestion, no TTS play
+          showToast(`Gesture: Enter -> "${firstWord}"`, 'success');
+        } else {
+          showToast('Gesture: Enter (No suggestions)', 'warning');
+        }
       } else {
         // Character gesture (default length is 1 or short word)
         insertChar(APP.detected);

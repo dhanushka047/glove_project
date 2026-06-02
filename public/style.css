@@ -1044,9 +1044,27 @@ input:checked + .slider:before { transform: translateX(20px); background-color: 
   gap: 10px;
   margin-top: 14px;
 }
+#btn-speak-sentence {
+  grid-column: span 2;
+}
 .manual-actions-grid .btn {
   padding: 8px 14px;
   font-size: 12px;
+}
+
+/* Dropdown Select Customization */
+select.text-input {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(240,240,255,0.6)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  padding-right: 40px;
+  cursor: pointer;
+}
+select.text-input option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
 }
 
 /* Word bank dictionary manager */
