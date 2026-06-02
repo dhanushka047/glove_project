@@ -432,11 +432,28 @@ function updateDetectedBanner(label) {
 // ═══════════════════════════════════════════════════════════════
 // ▶  Browser-side Detection (20-sample averaged buffer)
 // ═══════════════════════════════════════════════════════════════
+function angleDiff(a, b) {
+  let diff = (a - b) % 360;
+  if (diff < -180) diff += 360;
+  if (diff > 180) diff -= 360;
+  return Math.abs(diff);
+}
+
 function detectSignLocally(avgFlex) {
   let bestScore = 1e9;
   let bestLabel = null;
   for (const [label, sign] of Object.entries(APP.library)) {
     if (!Array.isArray(sign.avg_flex)) continue;
+
+    // Check orientation match with wrap-around support
+    const dp = angleDiff(APP.pitch, sign.avg_pitch || 0);
+    const dr = angleDiff(APP.roll,  sign.avg_roll || 0);
+    const dy = angleDiff(APP.yaw,   sign.avg_yaw || 0);
+
+    if (dp > (sign.angle_tol || 30) || dr > (sign.angle_tol || 30) || dy > (sign.angle_tol || 30)) {
+      continue; // Skip if hand orientation does not match calibrated angles
+    }
+
     let score = 0;
     for (let i = 0; i < 5; i++) {
       const d = avgFlex[i] - sign.avg_flex[i];
@@ -538,6 +555,25 @@ function initCalibration() {
     };
     grid.appendChild(btn);
   });
+
+  // Action quick pick buttons
+  const actionGrid = document.getElementById('action-quick-grid');
+  if (actionGrid) {
+    const actions = ['SPACE', 'BACKSPACE', 'RESET', 'HOLD', 'ENTER'];
+    actions.forEach(act => {
+      const btn = document.createElement('button');
+      btn.className = 'quick-btn';
+      btn.style.width = 'auto';
+      btn.style.padding = '0 12px';
+      btn.textContent = act;
+      btn.title = `Record Action "${act}"`;
+      btn.onclick = () => {
+        document.getElementById('calib-label-input').value = act;
+        document.getElementById('calib-label-input').focus();
+      };
+      actionGrid.appendChild(btn);
+    });
+  }
 
   document.getElementById('calib-start-btn').onclick  = startCalib;
   document.getElementById('calib-label-input').addEventListener('keydown', e => {
@@ -1321,7 +1357,7 @@ function handleTypingFrame() {
       } else if (gestureName === 'reset') {
         clearTyping();
         showToast('Gesture: Reset Text', 'info');
-      } else if (gestureName === 'detection hold') {
+      } else if (gestureName === 'detection hold' || gestureName === 'hold') {
         APP.typing.isPaused = !APP.typing.isPaused;
         showToast(APP.typing.isPaused ? 'Typing paused' : 'Typing active', 'warning');
       } else if (gestureName === 'enter') {

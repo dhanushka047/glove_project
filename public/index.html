@@ -190,9 +190,9 @@
         <div class="calib-step" id="calib-step-1">
           <div class="glass-card calib-card">
             <h2>What sign do you want to record?</h2>
-            <p class="hint-text">Type any letter, digit, or short word (max 7 chars).</p>
+            <p class="hint-text">Type any letter, digit, or action word (max 15 chars).</p>
             <div class="input-row">
-              <input type="text" id="calib-label-input" class="text-input big-input" placeholder="e.g. A" maxlength="7" autocomplete="off" aria-label="Sign label" />
+              <input type="text" id="calib-label-input" class="text-input big-input" placeholder="e.g. A" maxlength="15" autocomplete="off" aria-label="Sign label" />
               <button class="btn btn-primary btn-lg" id="calib-start-btn">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                 Start
@@ -209,8 +209,12 @@
               </div>
             </div>
             <div class="quick-picker">
-              <p class="quick-title">Quick pick:</p>
+              <p class="quick-title">Quick pick letters / numbers:</p>
               <div class="quick-grid" id="quick-grid"></div>
+            </div>
+            <div class="quick-picker" style="margin-top: 14px;">
+              <p class="quick-title">Quick pick actions:</p>
+              <div class="quick-grid" id="action-quick-grid"></div>
             </div>
           </div>
         </div>

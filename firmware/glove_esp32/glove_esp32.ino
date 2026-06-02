@@ -60,7 +60,7 @@ const int   SERVER_PORT = 3000;
 // ▶  Data Structures
 // ═══════════════════════════════════════════════════════════════
 struct SignRecord {
-  char  label[8];
+  char  label[16];
   float avg_flex[5];     // thumb, index, middle, ring, pinky (ADC 0–4095)
   float avg_pitch;
   float avg_roll;
@@ -91,7 +91,7 @@ float        curPitch, curRoll, curYaw;
 
 // Calibration state
 bool         calibActive    = false;
-char         calibLabel[8]  = "";
+char         calibLabel[16] = "";
 CalibSample  calibBuf[CALIB_SAMPLES];
 int          calibIdx       = 0;
 
@@ -126,8 +126,8 @@ void loadLibrary() {
   for (JsonPair kv : doc.as<JsonObject>()) {
     if (signCount >= MAX_SIGNS) break;
     SignRecord& s = signLib[signCount];
-    strncpy(s.label, kv.key().c_str(), 7);
-    s.label[7] = '\0';
+    strncpy(s.label, kv.key().c_str(), 15);
+    s.label[15] = '\0';
     JsonObject d = kv.value().as<JsonObject>();
     JsonArray  fa = d["avg_flex"].as<JsonArray>();
     for (int i = 0; i < 5 && i < (int)fa.size(); i++) s.avg_flex[i] = fa[i].as<float>();
@@ -180,8 +180,8 @@ void upsertSign(const char* label, float* flex, float pitch, float roll, float y
   // Insert new
   if (signCount >= MAX_SIGNS) { Serial.println("[LIB] Library full!"); return; }
   SignRecord& s = signLib[signCount++];
-  strncpy(s.label, label, 7);
-  s.label[7] = '\0';
+  strncpy(s.label, label, 15);
+  s.label[15] = '\0';
   for (int j = 0; j < 5; j++) s.avg_flex[j] = flex[j];
   s.avg_pitch  = pitch;
   s.avg_roll   = roll;
@@ -201,11 +201,28 @@ void deleteSign(const char* label) {
   saveLibrary();
 }
 
+inline float angleDiff(float a, float b) {
+  float diff = fmodf(a - b, 360.0f);
+  if (diff < -180.0f) diff += 360.0f;
+  if (diff > 180.0f) diff -= 360.0f;
+  return fabsf(diff);
+}
+
 int detectSign(float* flex, float pitch, float roll, float yaw) {
   float bestScore = 1e9f;
   int   bestIdx   = -1;
   for (int i = 0; i < signCount; i++) {
     if (!signLib[i].valid) continue;
+    
+    // Check orientation match with wrap-around support
+    float dp = angleDiff(pitch, signLib[i].avg_pitch);
+    float dr = angleDiff(roll,  signLib[i].avg_roll);
+    float dy = angleDiff(yaw,   signLib[i].avg_yaw);
+    
+    if (dp > signLib[i].angle_tol || dr > signLib[i].angle_tol || dy > signLib[i].angle_tol) {
+      continue; // Skip if hand orientation does not match calibrated angles
+    }
+
     float score = 0;
     for (int j = 0; j < 5; j++) {
       float d = flex[j] - signLib[i].avg_flex[j];
@@ -306,7 +323,7 @@ void processCommand(JsonDocument& doc) {
   if (strcmp(type, "start_recording") == 0) {
     const char* lbl = doc["label"];
     if (lbl) {
-      strncpy(calibLabel, lbl, 7); calibLabel[7] = '\0';
+      strncpy(calibLabel, lbl, 15); calibLabel[15] = '\0';
       calibIdx    = 0;
       calibActive = true;
       Serial.printf("[CALIB] Recording: %s\n", calibLabel);
