@@ -53,6 +53,18 @@ const APP = {
   _lastDetected : null,
   totalDetects  : 0,
 
+  // Sentence Typing State
+  typing: {
+    holdDuration: 1.2,
+    cooldownDuration: 2.0,
+    activeGesture: null,
+    holdStart: 0,
+    cooldownEnd: 0,
+    isPaused: false,
+    lastActionTime: 0
+  },
+  dictionary: [],
+
   // Stats
   fpsCounter    : { frames: 0, lastTime: Date.now() },
   peakPitch     : 0,
@@ -229,6 +241,7 @@ function onSensorData(data) {
   // Per-view updates
   if (APP.view === 'test')      updateTestMode();
   if (APP.view === 'calibrate' && APP.calib.phase === 'recording') recordCalibSample();
+  if (APP.view === 'typing')     handleTypingFrame();
 
   // Test flex bars (always update if visible)
   updateFlexBars('test-flex-bars', APP.flex);
@@ -487,7 +500,12 @@ function renderLibraryTable(filter = '') {
         <td><span class="session-chip">${sessions}&nbsp;sess &middot; ${totalSamp}&nbsp;samp</span></td>
         <td><span class="ver-chip">${signVer}</span></td>
         <td><span class="date-chip">${ts}</span></td>
-        <td><button class="btn btn-danger btn-sm" onclick="deleteSign('${label}')">Delete</button></td>
+        <td>
+          <div class="library-actions">
+            <button class="btn btn-outline btn-sm" onclick="editSignSettings('${label}')">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSign('${label}')">Delete</button>
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
@@ -817,6 +835,12 @@ function switchView(id) {
 
   // Trigger re-init for test mode history
   if (id === 'test') renderTestHistory();
+
+  // Initialize word lists and screen syncing for Sentence Typing View
+  if (id === 'typing') {
+    updateTypingState();
+    renderDictWordList();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -977,5 +1001,461 @@ document.addEventListener('DOMContentLoaded', () => {
     }).catch(() => {});
   }, 4000);
 
+  // Initialize Sentence Typing View
+  initTypingView();
+
+  // Initialize Edit Sign Modal
+  initEditSignModal();
+
   console.log('%c🧤 SignGlove Dashboard Ready', 'color:#7c5cfc;font-size:16px;font-weight:bold;');
 });
+
+// ═══════════════════════════════════════════════════════════════
+// ▶  Sentence Typing Logic & Auto-Suggestions
+// ═══════════════════════════════════════════════════════════════
+
+function initTypingView() {
+  // Load word bank from localStorage
+  const storedDict = localStorage.getItem('glove_word_bank');
+  if (storedDict) {
+    try { APP.dictionary = JSON.parse(storedDict); } catch (_) { initializeDefaultDict(); }
+  } else {
+    initializeDefaultDict();
+  }
+
+  // Handle settings sliders
+  const holdSlider = document.getElementById('hold-duration-input');
+  const holdValEl  = document.getElementById('hold-duration-val');
+  if (holdSlider && holdValEl) {
+    holdSlider.oninput = () => {
+      APP.typing.holdDuration = parseFloat(holdSlider.value);
+      holdValEl.textContent = APP.typing.holdDuration.toFixed(1) + 's';
+    };
+    APP.typing.holdDuration = parseFloat(holdSlider.value);
+  }
+
+  const cooldownSlider = document.getElementById('cooldown-input');
+  const cooldownValEl  = document.getElementById('cooldown-val');
+  if (cooldownSlider && cooldownValEl) {
+    cooldownSlider.oninput = () => {
+      APP.typing.cooldownDuration = parseFloat(cooldownSlider.value);
+      cooldownValEl.textContent = APP.typing.cooldownDuration.toFixed(1) + 's';
+    };
+    APP.typing.cooldownDuration = parseFloat(cooldownSlider.value);
+  }
+
+  // Manual actions
+  document.getElementById('btn-space-sentence').onclick     = () => insertChar(' ');
+  document.getElementById('btn-backspace-sentence').onclick = () => insertBackspace();
+  document.getElementById('btn-clear-sentence').onclick     = () => clearTyping();
+  document.getElementById('btn-speak-sentence').onclick     = () => speakSentence();
+
+  // Add word to dictionary
+  document.getElementById('btn-add-dict-word').onclick = () => {
+    const input = document.getElementById('dict-new-word');
+    const word = input.value.trim().toUpperCase();
+    if (!word) return;
+    if (!/^[A-Z]+$/.test(word)) {
+      showToast('Words must contain A-Z letters only', 'error');
+      return;
+    }
+    if (APP.dictionary.includes(word)) {
+      showToast('Word already in dictionary', 'warning');
+      return;
+    }
+    APP.dictionary.push(word);
+    APP.dictionary.sort();
+    localStorage.setItem('glove_word_bank', JSON.stringify(APP.dictionary));
+    renderDictWordList();
+    updateTypingState();
+    input.value = '';
+    showToast(`"${word}" added to word bank`, 'success');
+  };
+
+  // Keyboard support in dict textinput
+  document.getElementById('dict-new-word').onkeydown = (e) => {
+    if (e.key === 'Enter') document.getElementById('btn-add-dict-word').click();
+  };
+
+  // Setup text area live updates
+  document.getElementById('typing-textarea').oninput = () => {
+    updateTypingState();
+  };
+
+  renderDictWordList();
+  updateTypingState();
+}
+
+function initializeDefaultDict() {
+  APP.dictionary = [
+    'HELLO', 'WORLD', 'SIGN', 'GLOVE', 'PROJECT', 'ESP32', 
+    'COMPUTER', 'LANGUAGE', 'YES', 'NO', 'THANK', 'YOU', 
+    'HELP', 'PLEASE', 'GOOD', 'MORNING', 'WELCOME', 'FRIEND',
+    'HOW', 'ARE', 'I', 'AM', 'FINE', 'BAD', 'GREAT', 'NAME',
+    'WHAT', 'WHERE', 'WHEN', 'WHY', 'WHO'
+  ];
+  APP.dictionary.sort();
+  localStorage.setItem('glove_word_bank', JSON.stringify(APP.dictionary));
+}
+
+function renderDictWordList() {
+  const el = document.getElementById('dict-word-list');
+  if (!el) return;
+  el.innerHTML = APP.dictionary.map(word => `
+    <span class="dict-word-chip">
+      ${word}
+      <button onclick="removeDictWord('${word}')" aria-label="Remove word">&times;</button>
+    </span>
+  `).join('');
+}
+
+function removeDictWord(word) {
+  APP.dictionary = APP.dictionary.filter(w => w !== word);
+  localStorage.setItem('glove_word_bank', JSON.stringify(APP.dictionary));
+  renderDictWordList();
+  updateTypingState();
+  showToast(`"${word}" removed from dictionary`, 'warning');
+}
+
+// Auto-suggestions engine based on last word fragment
+function updateTypingState() {
+  const textarea = document.getElementById('typing-textarea');
+  if (!textarea) return;
+  const text = textarea.value;
+
+  // Find prefix of last word
+  const words = text.split(/[\s\n]+/);
+  const lastWord = words[words.length - 1].toUpperCase();
+
+  let matches = [];
+  if (lastWord.length > 0) {
+    matches = APP.dictionary.filter(w => w.startsWith(lastWord));
+  } else {
+    // If empty last word, suggest common words
+    matches = APP.dictionary.slice(0, 4);
+  }
+
+  // Take top 4 suggestions
+  const topMatches = matches.slice(0, 4);
+  const grid = document.getElementById('suggestions-grid');
+  if (grid) {
+    grid.innerHTML = '';
+    for (let i = 0; i < 4; i++) {
+      const w = topMatches[i];
+      const btn = document.createElement('button');
+      if (w) {
+        btn.className = 'suggestion-chip';
+        btn.textContent = w;
+        btn.onclick = () => selectSuggestion(w);
+      } else {
+        btn.className = 'suggestion-chip empty';
+        btn.textContent = '--';
+      }
+      grid.appendChild(btn);
+    }
+  }
+
+  // Send update to LCD screen
+  syncLCD(text, topMatches);
+}
+
+function selectSuggestion(word) {
+  const textarea = document.getElementById('typing-textarea');
+  if (!textarea) return;
+  const text = textarea.value;
+
+  // Replace last word fragment with selected suggestion
+  const words = text.split(/\s+/);
+  words[words.length - 1] = word;
+  
+  // Update textarea
+  textarea.value = words.join(' ') + ' ';
+  textarea.focus();
+  
+  // TTS speak selected word
+  speakWord(word);
+
+  updateTypingState();
+}
+
+function speakWord(word) {
+  const ttsToggle = document.getElementById('tts-toggle');
+  if (ttsToggle && ttsToggle.checked && word.trim()) {
+    const s = new SpeechSynthesisUtterance(word);
+    s.rate = 1.0;
+    window.speechSynthesis.speak(s);
+  }
+}
+
+function speakSentence() {
+  const textarea = document.getElementById('typing-textarea');
+  if (!textarea) return;
+  const sentence = textarea.value.trim();
+  if (!sentence) {
+    showToast('Nothing to speak!', 'warning');
+    return;
+  }
+  const s = new SpeechSynthesisUtterance(sentence);
+  s.rate = 1.0;
+  window.speechSynthesis.speak(s);
+}
+
+function clearTyping() {
+  const textarea = document.getElementById('typing-textarea');
+  if (textarea) textarea.value = '';
+  updateTypingState();
+  showToast('Sentence cleared', 'info');
+}
+
+function insertBackspace() {
+  const textarea = document.getElementById('typing-textarea');
+  if (!textarea) return;
+  const text = textarea.value;
+  if (text.length > 0) {
+    textarea.value = text.slice(0, -1);
+    updateTypingState();
+  }
+}
+
+function insertChar(char) {
+  const textarea = document.getElementById('typing-textarea');
+  if (!textarea) return;
+  
+  // Append char
+  textarea.value += char;
+  textarea.focus();
+
+  // If space entered, speak the word just completed
+  if (char === ' ') {
+    const words = textarea.value.trim().split(/\s+/);
+    const lastWord = words[words.length - 1];
+    if (lastWord) speakWord(lastWord);
+  }
+
+  updateTypingState();
+}
+
+// Relays typing lines to the ESP32 via WS update_lcd command
+function syncLCD(text, suggestions) {
+  // Line 0: Last 20 characters of sentence
+  let l0 = text;
+  if (l0.length > 20) l0 = l0.substring(l0.length - 20);
+  else l0 = l0.padEnd(20, ' ');
+
+  // Line 1: Active detected gesture and timer progress
+  let l1 = 'Act: None';
+  if (APP.detected) {
+    const pct = APP.typing.activeGesture === APP.detected && APP.typing.holdStart > 0
+      ? Math.round(Math.min(100, ((Date.now() - APP.typing.holdStart) / (APP.typing.holdDuration * 1000)) * 100))
+      : 0;
+    l1 = `Gesture: ${APP.detected} (${pct}%)`;
+  }
+  if (APP.typing.isPaused) l1 = '[DETECTION HELD]';
+
+  // Line 2 & 3: Suggestions
+  const s1 = suggestions[0] || '';
+  const s2 = suggestions[1] || '';
+  const s3 = suggestions[2] || '';
+  const s4 = suggestions[3] || '';
+
+  const l2 = `1:${s1.substring(0,8).padEnd(8,' ')} 2:${s2.substring(0,8)}`;
+  const l3 = `3:${s3.substring(0,8).padEnd(8,' ')} 4:${s4.substring(0,8)}`;
+
+  sendWS({
+    type: 'update_lcd',
+    lines: [l0, l1, l2, l3]
+  });
+}
+
+// Frame timer loop for typing view called from onSensorData
+function handleTypingFrame() {
+  const progressContainer = document.getElementById('hold-progress-container');
+  const progressFill = document.getElementById('typing-hold-fill');
+  const progressLbl  = document.getElementById('hold-progress-label');
+  const stateLabel    = document.getElementById('typing-state-lbl');
+
+  if (stateLabel) {
+    stateLabel.textContent = APP.typing.isPaused ? 'Paused' : 'Active';
+    stateLabel.className = 'typing-status' + (APP.typing.isPaused ? ' paused' : '');
+  }
+
+  if (APP.typing.isPaused) {
+    if (progressContainer) progressContainer.classList.remove('show');
+    return;
+  }
+
+  // Handle gesture cooldown
+  const now = Date.now();
+  if (now < APP.typing.cooldownEnd) {
+    if (progressContainer) progressContainer.classList.remove('show');
+    return;
+  }
+
+  if (APP.detected) {
+    if (APP.typing.activeGesture !== APP.detected) {
+      // New gesture detected
+      APP.typing.activeGesture = APP.detected;
+      APP.typing.holdStart = now;
+    }
+
+    const elapsed = (now - APP.typing.holdStart) / 1000;
+    const pct = Math.min(100, (elapsed / APP.typing.holdDuration) * 100);
+
+    if (progressContainer && progressFill && progressLbl) {
+      progressContainer.classList.add('show');
+      progressFill.style.width = pct.toFixed(1) + '%';
+      progressLbl.textContent = `Hold gesture: ${APP.detected} (${pct.toFixed(0)}%)`;
+    }
+
+    if (elapsed >= APP.typing.holdDuration) {
+      // Register gesture input!
+      const gestureName = APP.detected.toLowerCase();
+      
+      // Control gestures
+      if (gestureName === 'space') {
+        insertChar(' ');
+        showToast('Gesture: Space', 'info');
+      } else if (gestureName === 'backspace') {
+        insertBackspace();
+        showToast('Gesture: Backspace', 'info');
+      } else if (gestureName === 'reset') {
+        clearTyping();
+        showToast('Gesture: Reset Text', 'info');
+      } else if (gestureName === 'detection hold') {
+        APP.typing.isPaused = !APP.typing.isPaused;
+        showToast(APP.typing.isPaused ? 'Typing paused' : 'Typing active', 'warning');
+      } else if (gestureName === 'enter') {
+        speakSentence();
+        showToast('Gesture: Speak Sentence', 'success');
+      } else {
+        // Character gesture (default length is 1 or short word)
+        insertChar(APP.detected);
+        showToast(`Gesture: Typed "${APP.detected}"`, 'success');
+      }
+
+      // Start cooldown
+      APP.typing.cooldownEnd = Date.now() + (APP.typing.cooldownDuration * 1000);
+      APP.typing.activeGesture = null;
+      APP.typing.holdStart = 0;
+      if (progressContainer) progressContainer.classList.remove('show');
+    }
+  } else {
+    // No gesture detected
+    APP.typing.activeGesture = null;
+    APP.typing.holdStart = 0;
+    if (progressContainer) progressContainer.classList.remove('show');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ▶  Sign Settings Edit Modal (CRUD operations)
+// ═══════════════════════════════════════════════════════════════
+
+function initEditSignModal() {
+  const modal = document.getElementById('edit-sign-modal');
+  const cancelBtn = document.getElementById('edit-modal-cancel');
+  const saveBtn = document.getElementById('edit-modal-save');
+
+  // Cancel closes modal
+  cancelBtn.onclick = () => modal.classList.remove('open');
+  
+  // Close on backdrop click
+  modal.addEventListener('click', e => {
+    if (e.target === modal) modal.classList.remove('open');
+  });
+
+  // Wire up slider inputs within modal to update label values
+  const flexSlider = document.getElementById('edit-sign-flextol');
+  const flexValEl = document.getElementById('edit-sign-flextol-val');
+  if (flexSlider && flexValEl) {
+    flexSlider.oninput = () => {
+      flexValEl.textContent = flexSlider.value;
+    };
+  }
+
+  const angleSlider = document.getElementById('edit-sign-angletol');
+  const angleValEl = document.getElementById('edit-sign-angletol-val');
+  if (angleSlider && angleValEl) {
+    angleSlider.oninput = () => {
+      angleValEl.textContent = angleSlider.value + '°';
+    };
+  }
+
+  // Handle save clicks
+  saveBtn.onclick = () => {
+    const originalLabel = document.getElementById('edit-sign-original-label').value;
+    const rawNewLabel    = document.getElementById('edit-sign-label').value.trim();
+    const flexTol       = parseInt(flexSlider.value);
+    const angleTol      = parseInt(angleSlider.value);
+
+    if (!rawNewLabel) {
+      showToast('Label name cannot be empty', 'error');
+      return;
+    }
+
+    const newLabel = rawNewLabel.toUpperCase();
+
+    // Check for collision with an existing label that isn't the original
+    if (newLabel !== originalLabel && APP.library[newLabel]) {
+      showToast(`A sign named "${newLabel}" already exists`, 'error');
+      return;
+    }
+
+    // Send update command to server
+    sendWS({
+      type: 'update_sign_settings',
+      label: originalLabel,
+      newLabel: newLabel,
+      flex_tol: flexTol,
+      angle_tol: angleTol
+    });
+
+    // Update locally
+    const sign = APP.library[originalLabel];
+    if (sign) {
+      sign.flex_tol = flexTol;
+      sign.angle_tol = angleTol;
+      if (newLabel !== originalLabel) {
+        APP.library[newLabel] = sign;
+        delete APP.library[originalLabel];
+      }
+    }
+    
+    setLibrary(APP.library);
+    modal.classList.remove('open');
+    showToast(`Settings for "${newLabel}" updated`, 'success');
+  };
+}
+
+function editSignSettings(label) {
+  const sign = APP.library[label];
+  if (!sign) return;
+
+  const modal = document.getElementById('edit-sign-modal');
+  
+  // Set hidden variables and text fields
+  document.getElementById('edit-sign-original-label').value = label;
+  document.getElementById('edit-sign-label').value = label;
+
+  // Set flex slider
+  const flexSlider = document.getElementById('edit-sign-flextol');
+  const flexValEl = document.getElementById('edit-sign-flextol-val');
+  const flexVal = sign.flex_tol || 300;
+  if (flexSlider && flexValEl) {
+    flexSlider.value = flexVal;
+    flexValEl.textContent = flexVal;
+  }
+
+  // Set angle slider
+  const angleSlider = document.getElementById('edit-sign-angletol');
+  const angleValEl = document.getElementById('edit-sign-angletol-val');
+  const angleVal = sign.angle_tol || 30;
+  if (angleSlider && angleValEl) {
+    angleSlider.value = angleVal;
+    angleValEl.textContent = angleVal + '°';
+  }
+
+  // Open modal window
+  modal.classList.add('open');
+}
+

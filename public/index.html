@@ -70,6 +70,10 @@
         <span class="nav-icon">🔬</span>
         <span class="nav-label">Test Mode</span>
       </button>
+      <button class="nav-item" id="nav-typing" data-view="typing">
+        <span class="nav-icon">⌨️</span>
+        <span class="nav-label">Sentence Typing</span>
+      </button>
       <button class="nav-item" id="nav-export" data-view="export">
         <span class="nav-icon">📤</span>
         <span class="nav-label">Export</span>
@@ -342,6 +346,113 @@
       </div>
     </section>
 
+    <!-- ── SENTENCE TYPING ────────────────────────────────────── -->
+    <section id="view-typing" class="view" aria-label="Sentence Typing">
+      <div class="view-header">
+        <h1 class="view-title">Sentence Typing</h1>
+        <p class="view-sub">Form sentences with gestures, predictions, and speech feedback</p>
+      </div>
+
+      <div class="typing-grid">
+        <!-- Text output and Suggestion bar -->
+        <div class="glass-card typing-main-card">
+          <div class="card-header">
+            <h2 class="card-title">Typing Window</h2>
+            <div class="typing-status" id="typing-state-lbl">Active</div>
+          </div>
+          
+          <div class="typing-display-wrapper">
+            <textarea id="typing-textarea" class="typing-textarea" placeholder="Start gesturing to type..." aria-label="Typing Window text"></textarea>
+            
+            <div class="hold-progress-bar-container" id="hold-progress-container">
+              <span class="hold-progress-lbl" id="hold-progress-label">Hold gesture: A (0%)</span>
+              <div class="hold-progress-track">
+                <div class="hold-progress-fill" id="typing-hold-fill"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Predictions / Word Suggestions -->
+          <div class="suggestions-wrapper">
+            <h3 class="suggestions-title">Predicted Words (click to select):</h3>
+            <div class="suggestions-grid" id="suggestions-grid">
+              <button class="suggestion-chip empty">--</button>
+              <button class="suggestion-chip empty">--</button>
+              <button class="suggestion-chip empty">--</button>
+              <button class="suggestion-chip empty">--</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings and Speech Configuration -->
+        <div class="glass-card typing-sidebar-card">
+          <div class="card-header">
+            <h2 class="card-title">Typing Settings</h2>
+          </div>
+          
+          <div class="typing-settings-form">
+            <!-- TTS toggle -->
+            <div class="form-group-row">
+              <label class="switch-label" for="tts-toggle">Text to Speech (TTS)</label>
+              <label class="switch">
+                <input type="checkbox" id="tts-toggle" checked />
+                <span class="slider round"></span>
+              </label>
+            </div>
+
+            <!-- Hold duration timer slider -->
+            <div class="form-group-slider">
+              <div class="slider-header">
+                <label class="form-label" for="hold-duration-input">Gesture Hold Duration</label>
+                <span class="slider-val" id="hold-duration-val">1.2s</span>
+              </div>
+              <input type="range" id="hold-duration-input" class="range-slider" min="0.5" max="3.0" step="0.1" value="1.2" />
+            </div>
+
+            <!-- Cooldown interval slider -->
+            <div class="form-group-slider">
+              <div class="slider-header">
+                <label class="form-label" for="cooldown-input">Repeat Cooldown</label>
+                <span class="slider-val" id="cooldown-val">2.0s</span>
+              </div>
+              <input type="range" id="cooldown-input" class="range-slider" min="0.5" max="4.0" step="0.1" value="2.0" />
+            </div>
+
+            <!-- Manual action buttons -->
+            <div class="manual-actions-grid">
+              <button class="btn btn-primary" id="btn-speak-sentence">
+                <span>🔊</span> Speak
+              </button>
+              <button class="btn btn-outline" id="btn-clear-sentence">
+                <span>🗑️</span> Clear
+              </button>
+              <button class="btn btn-outline" id="btn-space-sentence">
+                <span>␣</span> Space
+              </button>
+              <button class="btn btn-outline" id="btn-backspace-sentence">
+                <span>⌫</span> Backspace
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Word Bank / Dictionary Manager -->
+        <div class="glass-card dict-manager-card">
+          <div class="card-header">
+            <h2 class="card-title">Custom Word Bank (Auto-Suggestions)</h2>
+          </div>
+          <p class="hint-text">Add custom words to dictionary for autocomplete suggestions.</p>
+          <div class="dict-form">
+            <input type="text" id="dict-new-word" class="text-input" placeholder="e.g. HELLO" maxlength="15" aria-label="Add custom word" />
+            <button class="btn btn-primary" id="btn-add-dict-word">Add Word</button>
+          </div>
+          <div class="dict-word-list" id="dict-word-list" aria-label="Dictionary words">
+            <!-- Rendered list of words -->
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ── EXPORT ─────────────────────────────────────────────── -->
     <section id="view-export" class="view" aria-label="Export">
       <div class="view-header">
@@ -416,6 +527,46 @@
     <div class="modal-actions">
       <button class="btn btn-outline" id="modal-cancel">Cancel</button>
       <button class="btn btn-primary" id="modal-connect">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     EDIT SIGN MODAL
+═══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="edit-sign-modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+  <div class="modal-box glass-card">
+    <h2 class="modal-title" id="edit-modal-title">Edit Sign Settings</h2>
+    <p class="modal-desc">Configure detection tolerances and label names for this gesture.</p>
+    
+    <input type="hidden" id="edit-sign-original-label" />
+
+    <div class="form-group">
+      <label class="form-label" for="edit-sign-label">Sign Label Name</label>
+      <input type="text" id="edit-sign-label" class="text-input" placeholder="e.g. A" maxlength="7" />
+    </div>
+
+    <div class="form-group-slider" style="margin-top: 14px;">
+      <div style="display: flex; justify-content: space-between;">
+        <label class="form-label" for="edit-sign-flextol">Flex Tolerance</label>
+        <span class="slider-val" id="edit-sign-flextol-val">300</span>
+      </div>
+      <input type="range" id="edit-sign-flextol" class="range-slider" min="50" max="1000" step="10" value="300" />
+      <span class="hint-text" style="font-size: 11px; margin-top: 2px;">Smaller = stricter flex sensor matching.</span>
+    </div>
+
+    <div class="form-group-slider" style="margin-top: 14px;">
+      <div style="display: flex; justify-content: space-between;">
+        <label class="form-label" for="edit-sign-angletol">Angle Tolerance</label>
+        <span class="slider-val" id="edit-sign-angletol-val">30°</span>
+      </div>
+      <input type="range" id="edit-sign-angletol" class="range-slider" min="5" max="90" step="1" value="30" />
+      <span class="hint-text" style="font-size: 11px; margin-top: 2px;">Smaller = stricter hand tilt angle matching.</span>
+    </div>
+
+    <div class="modal-actions" style="margin-top: 24px;">
+      <button class="btn btn-outline" id="edit-modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="edit-modal-save">Save Changes</button>
     </div>
   </div>
 </div>

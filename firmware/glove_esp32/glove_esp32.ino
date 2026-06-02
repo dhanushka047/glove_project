@@ -17,6 +17,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include "mpu6050_helper.h"
 
 // ═══════════════════════════════════════════════════════════════
@@ -39,9 +40,9 @@ const int   SERVER_PORT = 3000;
 #define PIN_FLEX_RING    A7   // A7
 #define PIN_FLEX_PINKY   A2   // A2
 
-// MPU6050 I2C
-#define PIN_SDA          9
-#define PIN_SCL          8
+// MPU6050 and LCD I2C
+#define PIN_SDA          17
+#define PIN_SCL          18
 
 // Button (boot button — LOW when pressed)
 #define PIN_BUTTON       0
@@ -79,6 +80,7 @@ struct CalibSample {
 // ═══════════════════════════════════════════════════════════════
 WebSocketsClient wsClient;
 MPU6050Helper    imu;
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 SignRecord   signLib[MAX_SIGNS];
 int          signCount      = 0;
@@ -281,6 +283,19 @@ void sendLibraryDump() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ▶  LCD Display Helper
+// ═══════════════════════════════════════════════════════════════
+void updateLcdStatus(const char* l0, const char* l1, const char* l2, const char* l3) {
+  const char* lines[4] = {l0, l1, l2, l3};
+  for (int i = 0; i < 4; i++) {
+    lcd.setCursor(0, i);
+    char buffer[21];
+    snprintf(buffer, sizeof(buffer), "%-20s", lines[i] ? lines[i] : "");
+    lcd.print(buffer);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ▶  WebSocket — Command Processing
 // ═══════════════════════════════════════════════════════════════
 void processCommand(JsonDocument& doc) {
@@ -296,6 +311,7 @@ void processCommand(JsonDocument& doc) {
       calibActive = true;
       Serial.printf("[CALIB] Recording: %s\n", calibLabel);
       wsSend("{\"type\":\"calib_started\"}");
+      updateLcdStatus("Calibration Mode", "Hold position for:", lbl, "Recording...");
     }
   }
 
@@ -303,6 +319,7 @@ void processCommand(JsonDocument& doc) {
   else if (strcmp(type, "stop_recording") == 0) {
     calibActive = false;
     Serial.println("[CALIB] Stopped");
+    updateLcdStatus("Calibration Done", "Processing...", "", "");
   }
 
   // ── save_sign  (browser already computed averages) ───────
@@ -314,6 +331,17 @@ void processCommand(JsonDocument& doc) {
       JsonArray fa = d["avg_flex"].as<JsonArray>();
       for (int i = 0; i < 5 && i < (int)fa.size(); i++) flex[i] = fa[i].as<float>();
       upsertSign(lbl, flex, d["avg_pitch"] | 0.0f, d["avg_roll"] | 0.0f, d["avg_yaw"] | 0.0f);
+      
+      // Update saved sign settings (tolerances) if present
+      for (int i = 0; i < signCount; i++) {
+        if (strcmp(signLib[i].label, lbl) == 0) {
+          signLib[i].flex_tol = d["flex_tol"] | signLib[i].flex_tol;
+          signLib[i].angle_tol = d["angle_tol"] | signLib[i].angle_tol;
+          break;
+        }
+      }
+      saveLibrary();
+
       StaticJsonDocument<128> ack;
       ack["type"]  = "sign_saved";
       ack["label"] = lbl;
@@ -339,7 +367,17 @@ void processCommand(JsonDocument& doc) {
                  kv.value()["avg_pitch"] | 0.0f,
                  kv.value()["avg_roll"]  | 0.0f,
                  kv.value()["avg_yaw"]   | 0.0f);
+      
+      // Sync settings
+      for (int i = 0; i < signCount; i++) {
+        if (strcmp(signLib[i].label, kv.key().c_str()) == 0) {
+          signLib[i].flex_tol = kv.value()["flex_tol"] | 300.0f;
+          signLib[i].angle_tol = kv.value()["angle_tol"] | 30.0f;
+          break;
+        }
+      }
     }
+    saveLibrary();
     sendLibraryDump();   // Echo merged lib back to server
   }
 
@@ -353,6 +391,20 @@ void processCommand(JsonDocument& doc) {
     imu.resetYaw();
     wsSend("{\"type\":\"yaw_reset\"}");
   }
+
+  // ── update_lcd ───────────────────────────────────────────
+  else if (strcmp(type, "update_lcd") == 0) {
+    JsonArray lines = doc["lines"].as<JsonArray>();
+    for (int i = 0; i < 4 && i < (int)lines.size(); i++) {
+      lcd.setCursor(0, i);
+      const char* txt = lines[i];
+      if (txt) {
+        char buffer[21];
+        snprintf(buffer, sizeof(buffer), "%-20s", txt);
+        lcd.print(buffer);
+      }
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -365,11 +417,13 @@ void onWebSocketEvent(WStype_t eventType, uint8_t* payload, size_t length) {
       wsConnected = true;
       // Identify role
       wsClient.sendTXT("{\"type\":\"identify\",\"role\":\"esp32\"}");
+      updateLcdStatus("WS Connected ✓", "Ready for gestures", "", "");
       break;
 
     case WStype_DISCONNECTED:
       Serial.println("[WS] Disconnected — retrying in 3s...");
       wsConnected = false;
+      updateLcdStatus("WS DISCONNECTED ✗", "Check start.sh / IP", "AP: FC_Project_v1", "IP: 192.168.4.1");
       break;
 
     case WStype_TEXT: {
@@ -381,6 +435,7 @@ void onWebSocketEvent(WStype_t eventType, uint8_t* payload, size_t length) {
 
     case WStype_ERROR:
       Serial.println("[WS] Error");
+      updateLcdStatus("WS ERROR ✗", "WebSocket error", "", "");
       break;
 
     default: break;
@@ -488,12 +543,27 @@ void setup() {
   }
   loadLibrary();
 
-  // I2C + MPU6050
+  // I2C + MPU6050 + LCD
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(400000);   // 400 kHz fast mode
+
+  // LCD setup
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Glove Init...");
+  lcd.setCursor(0, 1);
+  lcd.print("AP: FC_Project_v1");
+  lcd.setCursor(0, 2);
+  lcd.print("IP: 192.168.4.1");
+  lcd.setCursor(0, 3);
+  lcd.print("WS: Connecting...");
+
   if (!imu.begin()) {
-    Serial.println("[IMU] !! MPU6050 FAILED — halting. Check SDA=GPIO8 SCL=GPIO9 !!");
-    // Don't halt — still run WS so user can see error on dashboard
+    Serial.println("[IMU] !! MPU6050 FAILED — check SDA=17 SCL=18 !!");
+    lcd.setCursor(0, 0);
+    lcd.print("IMU FAILED! check i2c");
   }
 
   // ADC: 12-bit, 11dB (0–3.6V range)

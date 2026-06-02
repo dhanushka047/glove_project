@@ -241,6 +241,47 @@ wss.on('connection', (ws, req) => {
           break;
         }
 
+        case 'update_sign_settings': {
+          const { label, flex_tol, angle_tol, newLabel } = msg;
+          if (label && signsLibrary[label]) {
+            const sign = signsLibrary[label];
+            if (flex_tol !== undefined) sign.flex_tol = flex_tol;
+            if (angle_tol !== undefined) sign.angle_tol = angle_tol;
+            
+            let finalLabel = label;
+            if (newLabel && newLabel !== label) {
+              signsLibrary[newLabel] = sign;
+              delete signsLibrary[label];
+              finalLabel = newLabel;
+              sendESP32({ type: 'delete_sign', label });
+            }
+            
+            bumpVersion();
+            persistLibrary();
+            
+            // Relay to ESP32 to update its local LittleFS copy
+            sendESP32({
+              type: 'save_sign',
+              label: finalLabel,
+              data: {
+                avg_flex: sign.avg_flex,
+                avg_pitch: sign.avg_pitch,
+                avg_roll: sign.avg_roll,
+                avg_yaw: sign.avg_yaw,
+                flex_tol: sign.flex_tol,
+                angle_tol: sign.angle_tol
+              }
+            });
+            
+            broadcastBrowsers({ type: 'library_update', data: signsLibrary, version: libVersion, last_updated: libUpdatedAt });
+          }
+          break;
+        }
+
+        case 'update_lcd':
+          sendESP32(msg);
+          break;
+
         // Forward everything else to ESP32
         default:
           sendESP32(msg);
