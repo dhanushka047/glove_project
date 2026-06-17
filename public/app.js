@@ -37,6 +37,32 @@ const APP = {
     ySrc: 'y', yInv: false, // Logical Y (Pitch) = Physical Y
     zSrc: 'z', zInv: true   // Logical Z (Yaw) = -Physical Z
   },
+  flexRemap: JSON.parse(localStorage.getItem('glove_flex_remap')) || {
+    thumb: 0,
+    index: 1,
+    middle: 2,
+    ring: 3,
+    pinky: 4
+  },
+  flexLimits: JSON.parse(localStorage.getItem('glove_flex_limits')) || {
+    thumb: { min: 500, max: 4000 },
+    index: { min: 500, max: 4000 },
+    middle: { min: 500, max: 4000 },
+    ring: { min: 500, max: 4000 },
+    pinky: { min: 500, max: 4000 }
+  },
+  // Auto Detect calibration
+  autoDetect: {
+    active: false,
+    _saveCounter: 0,
+    seen: {
+      thumb:  { min: null, max: null },
+      index:  { min: null, max: null },
+      middle: { min: null, max: null },
+      ring:   { min: null, max: null },
+      pinky:  { min: null, max: null }
+    }
+  },
   viewMode: 'cube', // 'cube' or 'board'
   chartBuffer: {
     x: Array(200).fill(0),
@@ -216,12 +242,87 @@ function updateESP32Dot(ok) {
   lbl.textContent = ok ? 'ESP32 Online' : 'ESP32 Offline';
 }
 
+const scaleFlex = (val, min, max) => {
+  if (max === min) return 0;
+  const pct = ((val - min) / (max - min)) * 100;
+  return Math.max(0, Math.min(100, pct));
+};
+
 // ═══════════════════════════════════════════════════════════════
 // ▶  Sensor Data Handler
 // ═══════════════════════════════════════════════════════════════
 function onSensorData(data) {
-  APP.flex  = data.flex  || APP.flex;
+  const rawFlex = data.flex || [0, 0, 0, 0, 0];
+
+  // Extract raw channel values based on physical-to-logical mapping
+  const thumbRaw = rawFlex[APP.flexRemap.thumb] ?? 0;
+  const indexRaw = rawFlex[APP.flexRemap.index] ?? 0;
+  const middleRaw = rawFlex[APP.flexRemap.middle] ?? 0;
+  const ringRaw = rawFlex[APP.flexRemap.ring] ?? 0;
+  const pinkyRaw = rawFlex[APP.flexRemap.pinky] ?? 0;
+
+  // Update live raw ADC value displays in the Settings panel
+  const rawThumbEl = document.getElementById('raw-flex-thumb-val');
+  const rawIndexEl = document.getElementById('raw-flex-index-val');
+  const rawMiddleEl = document.getElementById('raw-flex-middle-val');
+  const rawRingEl = document.getElementById('raw-flex-ring-val');
+  const rawPinkyEl = document.getElementById('raw-flex-pinky-val');
+
+  if (rawThumbEl) rawThumbEl.textContent = Math.round(thumbRaw);
+  if (rawIndexEl) rawIndexEl.textContent = Math.round(indexRaw);
+  if (rawMiddleEl) rawMiddleEl.textContent = Math.round(middleRaw);
+  if (rawRingEl) rawRingEl.textContent = Math.round(ringRaw);
+  if (rawPinkyEl) rawPinkyEl.textContent = Math.round(pinkyRaw);
+
+  // Auto Detect: track live min/max for each finger and write back to inputs + APP state
+  if (APP.autoDetect.active) {
+    const FINGER_KEYS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+    const rawArr      = [thumbRaw, indexRaw, middleRaw, ringRaw, pinkyRaw];
+
+    FINGER_KEYS.forEach((finger, i) => {
+      const rv   = rawArr[i];
+      const seen = APP.autoDetect.seen[finger];
+
+      // Use explicit numeric sentinels — avoids any Infinity serialization bugs
+      if (seen.min === null || rv < seen.min) seen.min = rv;
+      if (seen.max === null || rv > seen.max) seen.max = rv;
+
+      const newMin = Math.round(seen.min);
+      const newMax = Math.round(seen.max);
+
+      // Always apply and reflect — don't gate on `changed`
+      APP.flexLimits[finger].min = newMin;
+      APP.flexLimits[finger].max = newMax;
+
+      const minEl = document.getElementById(`limit-flex-${finger}-min`);
+      const maxEl = document.getElementById(`limit-flex-${finger}-max`);
+      if (minEl && parseInt(minEl.value) !== newMin) minEl.value = newMin;
+      if (maxEl && parseInt(maxEl.value) !== newMax) maxEl.value = newMax;
+    });
+
+    // Persist throttled — every 10 frames to avoid excessive writes
+    APP.autoDetect._saveCounter = (APP.autoDetect._saveCounter || 0) + 1;
+    if (APP.autoDetect._saveCounter % 10 === 0) {
+      localStorage.setItem('glove_flex_limits', JSON.stringify(APP.flexLimits));
+    }
+  }
+
+  // Set logical flex states scaled to 0 - 100% range
+  APP.flex = [
+    scaleFlex(thumbRaw, APP.flexLimits.thumb.min, APP.flexLimits.thumb.max),
+    scaleFlex(indexRaw, APP.flexLimits.index.min, APP.flexLimits.index.max),
+    scaleFlex(middleRaw, APP.flexLimits.middle.min, APP.flexLimits.middle.max),
+    scaleFlex(ringRaw, APP.flexLimits.ring.min, APP.flexLimits.ring.max),
+    scaleFlex(pinkyRaw, APP.flexLimits.pinky.min, APP.flexLimits.pinky.max)
+  ];
   APP.accel = data.accel || APP.accel;
+
+  // Auto-mark ESP32 online when data arrives (handles missed identify)
+  if (!APP.esp32Ok) {
+    APP.esp32Ok = true;
+    updateESP32Dot(true);
+    startGyroCalibration();
+  }
 
   // Process Gyroscope-Only IMU data
   APP.gyroRaw = data.gyro || { x: 0, y: 0, z: 0 };
@@ -258,12 +359,6 @@ function onSensorData(data) {
     // Update telemetry charts buffers
     updateChartBuffers(APP.gyroCalibrated.x, APP.gyroCalibrated.y, APP.gyroCalibrated.z);
     updateGyroUI();
-  }
-
-  // Auto-mark ESP32 online when data arrives (handles missed identify)
-  if (!APP.esp32Ok) {
-    APP.esp32Ok = true;
-    updateESP32Dot(true);
   }
 
   // Rolling detection buffer — accumulate N live samples, then match
@@ -555,7 +650,7 @@ function startGyroCalibration() {
 
 function handleGyroCalibration(remapped) {
   APP.gyroCalibrationSamples.push({ ...remapped });
-  const targetSamples = 200;
+  const targetSamples = 50;
   const progress = Math.round((APP.gyroCalibrationSamples.length / targetSamples) * 100);
   
   const btn = document.getElementById('btn-tare-gyro');
@@ -595,6 +690,7 @@ function resetGyroOrientation() {
   APP.pitch = 0;
   APP.roll  = 0;
   APP.yaw   = 0;
+  sendWS({ type: 'reset_yaw' });
   showToast('Orientation reset to 0°', 'success');
 }
 
@@ -818,7 +914,123 @@ function initGyroIMU() {
     };
   }
 
+  // Flex sensor remapping select bindings
+  const flexThumb = document.getElementById('remap-flex-thumb');
+  const flexIndex = document.getElementById('remap-flex-index');
+  const flexMiddle = document.getElementById('remap-flex-middle');
+  const flexRing = document.getElementById('remap-flex-ring');
+  const flexPinky = document.getElementById('remap-flex-pinky');
+
+  const updateFlexRemapConfig = () => {
+    if (flexThumb) APP.flexRemap.thumb = parseInt(flexThumb.value);
+    if (flexIndex) APP.flexRemap.index = parseInt(flexIndex.value);
+    if (flexMiddle) APP.flexRemap.middle = parseInt(flexMiddle.value);
+    if (flexRing) APP.flexRemap.ring = parseInt(flexRing.value);
+    if (flexPinky) APP.flexRemap.pinky = parseInt(flexPinky.value);
+    localStorage.setItem('glove_flex_remap', JSON.stringify(APP.flexRemap));
+  };
+
+  [flexThumb, flexIndex, flexMiddle, flexRing, flexPinky].forEach(el => {
+    if (el) {
+      el.value = APP.flexRemap[el.id.replace('remap-flex-', '')];
+      el.addEventListener('change', updateFlexRemapConfig);
+    }
+  });
+
+  // Flex sensor calibration limits bindings
+  const fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  fingers.forEach(finger => {
+    const minEl = document.getElementById(`limit-flex-${finger}-min`);
+    const maxEl = document.getElementById(`limit-flex-${finger}-max`);
+    if (minEl && maxEl) {
+      minEl.value = APP.flexLimits[finger].min;
+      maxEl.value = APP.flexLimits[finger].max;
+      
+      const updateLimits = () => {
+        APP.flexLimits[finger].min = parseInt(minEl.value) || 0;
+        APP.flexLimits[finger].max = parseInt(maxEl.value) || 0;
+        localStorage.setItem('glove_flex_limits', JSON.stringify(APP.flexLimits));
+      };
+      
+      minEl.addEventListener('input', updateLimits);
+      maxEl.addEventListener('input', updateLimits);
+    }
+  });
+
   initChart();
+
+  // ── Auto Detect toggle ──────────────────────────────────────
+  const btnAutoDetect = document.getElementById('btn-flex-auto-detect');
+  const autoDetectDot = document.getElementById('auto-detect-dot');
+  const autoDetectLabel = document.getElementById('auto-detect-label');
+  const autoDetectBanner = document.getElementById('auto-detect-banner');
+  const btnResetLimits = document.getElementById('btn-flex-reset-limits');
+
+  function setAutoDetectUI(active) {
+    if (active) {
+      autoDetectDot.style.background = '#00f064';
+      autoDetectLabel.textContent = 'Stop Detect';
+      btnAutoDetect.classList.add('auto-detect-active-btn');
+      autoDetectBanner.style.display = 'flex';
+      // Highlight all limit inputs green
+      ['thumb','index','middle','ring','pinky'].forEach(f => {
+        const minEl = document.getElementById(`limit-flex-${f}-min`);
+        const maxEl = document.getElementById(`limit-flex-${f}-max`);
+        if (minEl) minEl.classList.add('limit-input-autoset');
+        if (maxEl) maxEl.classList.add('limit-input-autoset');
+      });
+    } else {
+      autoDetectDot.style.background = '#666';
+      autoDetectLabel.textContent = 'Auto Detect';
+      btnAutoDetect.classList.remove('auto-detect-active-btn');
+      autoDetectBanner.style.display = 'none';
+      // Remove highlight
+      ['thumb','index','middle','ring','pinky'].forEach(f => {
+        const minEl = document.getElementById(`limit-flex-${f}-min`);
+        const maxEl = document.getElementById(`limit-flex-${f}-max`);
+        if (minEl) minEl.classList.remove('limit-input-autoset');
+        if (maxEl) maxEl.classList.remove('limit-input-autoset');
+      });
+    }
+  }
+
+  if (btnAutoDetect) {
+    btnAutoDetect.addEventListener('click', () => {
+      const nowActive = !APP.autoDetect.active;
+      APP.autoDetect.active = nowActive;
+      if (nowActive) {
+        // Reset seen ranges using null sentinels — clean slate every session
+        ['thumb','index','middle','ring','pinky'].forEach(f => {
+          APP.autoDetect.seen[f] = { min: null, max: null };
+        });
+        APP.autoDetect._saveCounter = 0;
+        showToast('Auto Detect ON — move each finger fully to calibrate', 'info');
+      } else {
+        localStorage.setItem('glove_flex_limits', JSON.stringify(APP.flexLimits));
+        showToast('Auto Detect OFF — limits saved!', 'success');
+      }
+      setAutoDetectUI(nowActive);
+    });
+  }
+
+  if (btnResetLimits) {
+    btnResetLimits.addEventListener('click', () => {
+      if (APP.autoDetect.active) {
+        APP.autoDetect.active = false;
+        setAutoDetectUI(false);
+      }
+      const defaults = { thumb: { min: 500, max: 4000 }, index: { min: 500, max: 4000 }, middle: { min: 500, max: 4000 }, ring: { min: 500, max: 4000 }, pinky: { min: 500, max: 4000 } };
+      APP.flexLimits = defaults;
+      localStorage.setItem('glove_flex_limits', JSON.stringify(defaults));
+      ['thumb','index','middle','ring','pinky'].forEach(f => {
+        const minEl = document.getElementById(`limit-flex-${f}-min`);
+        const maxEl = document.getElementById(`limit-flex-${f}-max`);
+        if (minEl) minEl.value = defaults[f].min;
+        if (maxEl) maxEl.value = defaults[f].max;
+      });
+      showToast('Flex limits reset to defaults', 'warning');
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -851,8 +1063,8 @@ function updateFlexBars(id, flex) {
   flex.forEach((v, i) => {
     const fill = document.getElementById(`${id}-fill-${i}`);
     const val  = document.getElementById(`${id}-val-${i}`);
-    if (fill) fill.style.width = ((v / 4095) * 100).toFixed(1) + '%';
-    if (val)  val.textContent = Math.round(v);
+    if (fill) fill.style.width = v.toFixed(1) + '%';
+    if (val)  val.textContent = Math.round(v) + '%';
   });
 }
 
@@ -908,7 +1120,7 @@ function detectSignLocally(avgFlex) {
       score += d * d;
     }
     score = Math.sqrt(score);
-    if (score < bestScore && score < (sign.flex_tol || 300)) {
+    if (score < bestScore && score < (sign.flex_tol || 25)) {
       bestScore = score;
       bestLabel = label;
     }
@@ -1188,7 +1400,7 @@ function mergeSessionsLocally(label, sessions) {
     avg_pitch    : gPitch / n,
     avg_roll     : gRoll  / n,
     avg_yaw      : gYaw   / n,
-    flex_tol     : 300,
+    flex_tol     : 25,
     angle_tol    : 30,
     sessions     : sessions,
     session_count: n,
@@ -1267,7 +1479,7 @@ function updateTestMode() {
         dist += d * d;
       }
       dist = Math.sqrt(dist);
-      confidence = Math.max(0, Math.min(100, 100 - (dist / (sign.flex_tol || 300)) * 100));
+      confidence = Math.max(0, Math.min(100, 100 - (dist / (sign.flex_tol || 25)) * 100));
     }
 
     if (APP.detected !== APP._lastDetected) {
@@ -1994,7 +2206,7 @@ function editSignSettings(label) {
   // Set flex slider
   const flexSlider = document.getElementById('edit-sign-flextol');
   const flexValEl = document.getElementById('edit-sign-flextol-val');
-  const flexVal = sign.flex_tol || 300;
+  const flexVal = sign.flex_tol || 25;
   if (flexSlider && flexValEl) {
     flexSlider.value = flexVal;
     flexValEl.textContent = flexVal;

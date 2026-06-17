@@ -35,11 +35,11 @@ const int   SERVER_PORT = 3001;
 // ▶  Pin Definitions
 // ═══════════════════════════════════════════════════════════════
 // Flex sensor ADC pins (ESP32-S3 uses GPIO numbers)
-#define PIN_FLEX_THUMB   A1   // A1
-#define PIN_FLEX_INDEX   A3   // A3
-#define PIN_FLEX_MIDDLE  A5   // A5
-#define PIN_FLEX_RING    A7   // A7
-#define PIN_FLEX_PINKY   A2   // A2
+#define PIN_FLEX_THUMB   A1   // GPIO1
+#define PIN_FLEX_INDEX   A3   // GPIO3
+#define PIN_FLEX_MIDDLE  A5   // GPIO5
+#define PIN_FLEX_RING    A7   // GPIO7
+#define PIN_FLEX_PINKY   A2   // GPIO2
 
 // MPU6050 and LCD I2C
 #define PIN_SDA          17
@@ -106,6 +106,11 @@ unsigned long btnPressTime  = 0;
 
 // WS state
 bool         wsConnected    = false;
+
+// UDP Discovery Globals
+WiFiUDP      udp;
+const int    localUdpPort = 9999;
+char         udpPacketBuffer[64];
 
 // ═══════════════════════════════════════════════════════════════
 // ▶  LittleFS — Persistence
@@ -579,7 +584,7 @@ void setup() {
   lcd.setCursor(0, 3);
   lcd.print("WS: Connecting...");
 
-  if (!imu.begin()) {
+  if (!imu.begin(PIN_SDA, PIN_SCL)) {
     Serial.println("[IMU] !! MPU6050 FAILED — check SDA=17 SCL=18 !!");
     lcd.setCursor(0, 0);
     lcd.print("IMU FAILED! check i2c");
@@ -609,6 +614,10 @@ void setup() {
   Serial.println("  ╚══════════════════════════════════════╝");
   Serial.println();
 
+  // Start listening for UDP discovery beacons
+  udp.begin(localUdpPort);
+  Serial.printf("[UDP] Listening for server discovery beacons on port %d\n", localUdpPort);
+
   // WebSocket
   wsClient.begin(SERVER_HOST, SERVER_PORT, "/");
   wsClient.onEvent(onWebSocketEvent);
@@ -626,6 +635,41 @@ void setup() {
 // ▶  loop()
 // ═══════════════════════════════════════════════════════════════
 void loop() {
+  // Check UDP broadcast for server discovery (only when not connected to WS)
+  if (!wsConnected) {
+    int packetSize = udp.parsePacket();
+    if (packetSize) {
+      int len = udp.read(udpPacketBuffer, sizeof(udpPacketBuffer) - 1);
+      if (len > 0) {
+        udpPacketBuffer[len] = '\0';
+        String msg = String(udpPacketBuffer);
+        if (msg.startsWith("SignGloveServer:")) {
+          IPAddress remoteIp = udp.remoteIP();
+          String discoveredHost = remoteIp.toString();
+          int discoveredPort = msg.substring(16).toInt();
+          
+          static String lastDiscoveredHost = "";
+          static int lastDiscoveredPort = 0;
+          
+          if (discoveredHost != lastDiscoveredHost || discoveredPort != lastDiscoveredPort) {
+            lastDiscoveredHost = discoveredHost;
+            lastDiscoveredPort = discoveredPort;
+            Serial.printf("[Discovery] Server discovered at %s:%d\n", discoveredHost.c_str(), discoveredPort);
+            
+            // Re-bind WebSocket client to the new host/port
+            wsClient.disconnect();
+            wsClient.begin(discoveredHost.c_str(), discoveredPort, "/");
+            
+            // Update LCD
+            char ipLine[21];
+            snprintf(ipLine, sizeof(ipLine), "Srv: %s:%d", discoveredHost.c_str(), discoveredPort);
+            updateLcdStatus("Server Discovered!", ipLine, "Connecting...", "");
+          }
+        }
+      }
+    }
+  }
+
   imu.update();         // must run every cycle — complementary filter accuracy
   wsClient.loop();
   handleButton();

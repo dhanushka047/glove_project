@@ -221,6 +221,145 @@
               <button id="btn-preset-inverted" class="btn btn-tiny">FLAT / NORMAL</button>
             </div>
           </div>
+
+          <!-- Flex Sensor Channel Remapping -->
+          <div class="settings-group" style="margin-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+              <h3 style="margin: 0;">Flex Sensor Mappings</h3>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button id="btn-flex-reset-limits" class="btn btn-tiny" title="Reset all min/max limits to defaults" style="font-size: 10px; padding: 3px 8px; opacity: 0.7;">RESET</button>
+                <button id="btn-flex-auto-detect" class="btn btn-tiny" style="font-size: 10px; padding: 3px 10px; display: flex; align-items: center; gap: 5px; transition: all 0.3s ease;">
+                  <span id="auto-detect-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #666; display: inline-block; transition: background 0.3s;"></span>
+                  <span id="auto-detect-label">Auto Detect</span>
+                </button>
+              </div>
+            </div>
+            <p class="settings-info" style="margin-bottom: 10px;">Map physical ADC channels to logical fingers.</p>
+
+            <!-- Auto Detect Status Bar -->
+            <div id="auto-detect-banner" style="display: none; align-items: center; gap: 8px; background: rgba(0, 240, 100, 0.07); border: 1px solid rgba(0, 240, 100, 0.25); border-radius: 8px; padding: 7px 12px; margin-bottom: 10px; font-size: 11px;">
+              <span style="width: 8px; height: 8px; border-radius: 50%; background: #00f064; display: inline-block; animation: pulse-dot 1s ease-in-out infinite;"></span>
+              <span style="color: #00f064; font-weight: 600;">Auto Detect Active</span>
+              <span style="color: var(--text-secondary);">— Move each finger to its full straight &amp; bent positions. Min/Max will update live.</span>
+            </div>
+
+            <div class="remapping-container">
+              <!-- Header -->
+              <div class="remap-grid-header" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                <div>Finger</div>
+                <div>ADC Source</div>
+                <div style="text-align: center;">Raw</div>
+                <div style="text-align: center;">Min</div>
+                <div style="text-align: center;">Max</div>
+              </div>
+
+              <!-- Thumb -->
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+                <div class="axis-label" style="color: #7c5cfc; font-weight: 500; font-size: 11px;">Thumb</div>
+                <div class="select-wrapper">
+                  <select id="remap-flex-thumb" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
+                    <option value="0" selected>Channel 1 (A1)</option>
+                    <option value="1">Channel 2 (A3)</option>
+                    <option value="2">Channel 3 (A5)</option>
+                    <option value="3">Channel 4 (A7)</option>
+                    <option value="4">Channel 5 (A2)</option>
+                  </select>
+                </div>
+                <div id="raw-flex-thumb-val" style="font-family: monospace; font-size: 11px; text-align: center; color: var(--text-secondary);">0</div>
+                <div>
+                  <input type="number" id="limit-flex-thumb-min" class="text-input" value="500" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+                <div>
+                  <input type="number" id="limit-flex-thumb-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+              </div>
+
+              <!-- Index -->
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+                <div class="axis-label" style="color: #2979ff; font-weight: 500; font-size: 11px;">Index</div>
+                <div class="select-wrapper">
+                  <select id="remap-flex-index" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
+                    <option value="0">Channel 1 (A1)</option>
+                    <option value="1" selected>Channel 2 (A3)</option>
+                    <option value="2">Channel 3 (A5)</option>
+                    <option value="3">Channel 4 (A7)</option>
+                    <option value="4">Channel 5 (A2)</option>
+                  </select>
+                </div>
+                <div id="raw-flex-index-val" style="font-family: monospace; font-size: 11px; text-align: center; color: var(--text-secondary);">0</div>
+                <div>
+                  <input type="number" id="limit-flex-index-min" class="text-input" value="500" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+                <div>
+                  <input type="number" id="limit-flex-index-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+              </div>
+
+              <!-- Middle -->
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+                <div class="axis-label" style="color: #00bcd4; font-weight: 500; font-size: 11px;">Middle</div>
+                <div class="select-wrapper">
+                  <select id="remap-flex-middle" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
+                    <option value="0">Channel 1 (A1)</option>
+                    <option value="1">Channel 2 (A3)</option>
+                    <option value="2" selected>Channel 3 (A5)</option>
+                    <option value="3">Channel 4 (A7)</option>
+                    <option value="4">Channel 5 (A2)</option>
+                  </select>
+                </div>
+                <div id="raw-flex-middle-val" style="font-family: monospace; font-size: 11px; text-align: center; color: var(--text-secondary);">0</div>
+                <div>
+                  <input type="number" id="limit-flex-middle-min" class="text-input" value="500" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+                <div>
+                  <input type="number" id="limit-flex-middle-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+              </div>
+
+              <!-- Ring -->
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+                <div class="axis-label" style="color: #00e676; font-weight: 500; font-size: 11px;">Ring</div>
+                <div class="select-wrapper">
+                  <select id="remap-flex-ring" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
+                    <option value="0">Channel 1 (A1)</option>
+                    <option value="1">Channel 2 (A3)</option>
+                    <option value="2">Channel 3 (A5)</option>
+                    <option value="3" selected>Channel 4 (A7)</option>
+                    <option value="4">Channel 5 (A2)</option>
+                  </select>
+                </div>
+                <div id="raw-flex-ring-val" style="font-family: monospace; font-size: 11px; text-align: center; color: var(--text-secondary);">0</div>
+                <div>
+                  <input type="number" id="limit-flex-ring-min" class="text-input" value="500" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+                <div>
+                  <input type="number" id="limit-flex-ring-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+              </div>
+
+              <!-- Pinky -->
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+                <div class="axis-label" style="color: #ff9100; font-weight: 500; font-size: 11px;">Pinky</div>
+                <div class="select-wrapper">
+                  <select id="remap-flex-pinky" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
+                    <option value="0">Channel 1 (A1)</option>
+                    <option value="1">Channel 2 (A3)</option>
+                    <option value="2">Channel 3 (A5)</option>
+                    <option value="3">Channel 4 (A7)</option>
+                    <option value="4" selected>Channel 5 (A2)</option>
+                  </select>
+                </div>
+                <div id="raw-flex-pinky-val" style="font-family: monospace; font-size: 11px; text-align: center; color: var(--text-secondary);">0</div>
+                <div>
+                  <input type="number" id="limit-flex-pinky-min" class="text-input" value="500" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+                <div>
+                  <input type="number" id="limit-flex-pinky-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
         </div>
 
         <!-- Gyroscope Telemetry & Charts -->
@@ -702,9 +841,9 @@
     <div class="form-group-slider" style="margin-top: 14px;">
       <div style="display: flex; justify-content: space-between;">
         <label class="form-label" for="edit-sign-flextol">Flex Tolerance</label>
-        <span class="slider-val" id="edit-sign-flextol-val">300</span>
+        <span class="slider-val" id="edit-sign-flextol-val">25</span>
       </div>
-      <input type="range" id="edit-sign-flextol" class="range-slider" min="50" max="1000" step="10" value="300" />
+      <input type="range" id="edit-sign-flextol" class="range-slider" min="5" max="100" step="1" value="25" />
       <span class="hint-text" style="font-size: 11px; margin-top: 2px;">Smaller = stricter flex sensor matching.</span>
     </div>
 

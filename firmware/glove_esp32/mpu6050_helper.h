@@ -35,7 +35,9 @@ public:
   float gyroZ = 0.0f;
 
   // ── Initialise ───────────────────────────────────────────
-  bool begin() {
+  bool begin(int sda = 17, int scl = 18) {
+    _sda = sda;
+    _scl = scl;
     Serial.println("[IMU] Initializing MPU6050 (Direct Wire, Gyro-Only)...");
     
     // Check connection
@@ -75,6 +77,8 @@ public:
 
   // ── Update (call every loop tick) ────────────────────────
   void update() {
+    bool success = false;
+
     // Read 6 bytes starting from GYRO_XOUT_H (0x43)
     Wire.beginTransmission(MPU6050_ADDR);
     Wire.write(MPU6050_DATA_START);
@@ -94,6 +98,29 @@ public:
 
         // Perform dead-reckoning integration on the ESP32
         integrateOrientation();
+        success = true;
+        _consecutiveFailures = 0;
+      }
+    }
+
+    if (!success) {
+      // Reset gyro rates to 0 on failure to prevent stale data runaway integration
+      gyroX = 0.0f;
+      gyroY = 0.0f;
+      gyroZ = 0.0f;
+
+      _consecutiveFailures++;
+      if (_consecutiveFailures >= 10) {
+        Serial.printf("[IMU] Warning: %d consecutive I2C read failures. Re-initializing Wire bus...\n", _consecutiveFailures);
+        Wire.begin(_sda, _scl);
+        Wire.setClock(400000);
+        // Re-initialize registers in case sensor power-cycled
+        writeRegister(MPU6050_PWR_MGMT_1, 0x00);
+        writeRegister(MPU6050_SMPLRT_DIV, 0x07);
+        writeRegister(MPU6050_CONFIG, 0x03);
+        writeRegister(MPU6050_GYRO_CONFIG, 0x08);
+        writeRegister(MPU6050_ACCEL_CONFIG, 0x08);
+        _consecutiveFailures = 0;
       }
     }
   }
@@ -108,6 +135,9 @@ public:
 
 private:
   unsigned long _lastTime = 0;
+  int _sda = 17;
+  int _scl = 18;
+  int _consecutiveFailures = 0;
   
   // Gyro biases calculated during startup
   float _biasX = 0.0f;

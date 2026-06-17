@@ -169,6 +169,21 @@ body {
   0%,100% { box-shadow: 0 0 6px var(--status-online); }
   50%      { box-shadow: 0 0 14px var(--status-online), 0 0 28px rgba(0,230,118,0.3); }
 }
+@keyframes pulse-dot {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.5; transform: scale(1.35); }
+}
+.auto-detect-active-btn {
+  background: rgba(0, 240, 100, 0.12) !important;
+  border-color: rgba(0, 240, 100, 0.5) !important;
+  color: #00f064 !important;
+  box-shadow: 0 0 10px rgba(0, 240, 100, 0.15);
+}
+.limit-input-autoset {
+  border-color: rgba(0, 240, 100, 0.5) !important;
+  color: #00f064 !important;
+  transition: border-color 0.3s, color 0.3s;
+}
 
 /* ═══════════════════════════════════════════════════════════
    LAYOUT
