@@ -1112,6 +1112,259 @@ select.text-input option {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   GYROSCOPE-ONLY IMU STYLING
+   ═══════════════════════════════════════════════════════════ */
+:root {
+  --color-x: #ff3366;
+  --color-y: #00ff87;
+  --color-z: #00f0ff;
+  --color-x-bg: rgba(255, 51, 102, 0.15);
+}
+
+.view-modes .btn-icon-only {
+  transition: all var(--dur-fast);
+}
+.view-modes .btn-icon-only.active {
+  background: rgba(124, 92, 252, 0.15) !important;
+  border-color: var(--accent-1) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 0 8px rgba(124, 92, 252, 0.25);
+}
+
+.remapping-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
+.remap-grid-header {
+  display: grid;
+  grid-template-columns: 100px 1fr 50px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 0 4px;
+}
+.remap-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 50px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+}
+.axis-label {
+  font-size: 11px;
+  font-weight: 700;
+}
+.axis-label.axis-x { color: var(--color-x); }
+.axis-label.axis-y { color: var(--color-y); }
+.axis-label.axis-z { color: var(--color-z); }
+
+.select-wrapper select {
+  width: 100%;
+  outline: none;
+  cursor: pointer;
+}
+.center-align {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.preset-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn-tiny {
+  padding: 4px 10px;
+  font-size: 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  flex-grow: 1;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+.btn-tiny:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+.btn-tiny.active {
+  background: rgba(0, 240, 255, 0.1) !important;
+  border-color: var(--color-z) !important;
+  color: var(--color-z) !important;
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.15);
+}
+
+/* Toggle Switches */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+}
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-switch .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(255, 255, 255, 0.08);
+  transition: .2s;
+  border-radius: 18px;
+  border: 1px solid var(--glass-border);
+}
+.toggle-switch .slider:before {
+  position: absolute;
+  content: "";
+  height: 10px;
+  width: 10px;
+  left: 3px;
+  bottom: 3px;
+  background-color: var(--text-muted);
+  transition: .2s;
+  border-radius: 50%;
+}
+.toggle-switch input:checked + .slider {
+  background-color: var(--color-x-bg);
+  border-color: var(--color-x);
+}
+.toggle-switch input:checked + .slider:before {
+  transform: translateX(14px);
+  background-color: var(--color-x);
+  box-shadow: 0 0 6px var(--color-x);
+}
+
+/* Telemetry statistics styling */
+.telemetry-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  border-left: 2px solid var(--color-z);
+  padding-left: 6px;
+  text-transform: uppercase;
+}
+.section-title .unit {
+  font-family: 'JetBrains Mono', monospace;
+  opacity: 0.6;
+}
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  position: relative;
+  overflow: hidden;
+}
+.metric-axis {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text-muted);
+  position: absolute;
+  top: 4px;
+  right: 8px;
+}
+.metric-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 4px;
+  letter-spacing: -0.5px;
+}
+.metric-bar-container {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  margin-top: 8px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.metric-bar {
+  height: 100%;
+  width: 0%;
+  transition: width 0.1s ease-out;
+  border-radius: var(--radius-sm);
+}
+.card-x .metric-bar { background-color: var(--color-x); box-shadow: 0 0 6px var(--color-x); }
+.card-y .metric-bar { background-color: var(--color-y); box-shadow: 0 0 6px var(--color-y); }
+.card-z .metric-bar { background-color: var(--color-z); box-shadow: 0 0 6px var(--color-z); }
+.card-x .metric-axis { color: var(--color-x); }
+.card-y .metric-axis { color: var(--color-y); }
+.card-z .metric-axis { color: var(--color-z); }
+
+/* Chart Styles */
+.chart-container {
+  flex-grow: 1;
+  position: relative;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  height: 180px;
+}
+#chart-canvas {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+.chart-legend {
+  position: absolute;
+  top: 10px;
+  right: 16px;
+  display: flex;
+  gap: 12px;
+  background: rgba(7, 7, 26, 0.85);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  z-index: 5;
+  backdrop-filter: blur(8px);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.legend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.dot-x { background-color: var(--color-x); box-shadow: 0 0 4px var(--color-x); }
+.dot-y { background-color: var(--color-y); box-shadow: 0 0 4px var(--color-y); }
+.dot-z { background-color: var(--color-z); box-shadow: 0 0 4px var(--color-z); }
+
+/* ═══════════════════════════════════════════════════════════
    RESPONSIVE
 ═══════════════════════════════════════════════════════════ */
 @media (max-width: 1024px) {

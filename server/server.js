@@ -446,6 +446,30 @@ app.get('/api/export/arduino', (_req, res) => {
 // ── Catch-all → index.html (SPA) ─────────────────────────────
 app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC, 'index.html')));
 
+// ── UDP Broadcast for ESP32 discovery ────────────────────────
+const dgram = require('dgram');
+
+function startUdpBroadcast() {
+  const udpServer = dgram.createSocket('udp4');
+  udpServer.on('error', (err) => {
+    console.error('[UDP] Discovery socket error:', err.message);
+    try { udpServer.close(); } catch (_) {}
+  });
+
+  udpServer.bind(() => {
+    udpServer.setBroadcast(true);
+    setInterval(() => {
+      try {
+        const message = Buffer.from(`SignGloveServer:${PORT}`);
+        udpServer.send(message, 9999, '255.255.255.255');
+      } catch (e) {
+        console.error('[UDP] Broadcast send error:', e.message);
+      }
+    }, 2000);
+    console.log(`📡  UDP Broadcast server active on port 9999`);
+  });
+}
+
 // ─────────────────────────────────────────────────────────────
 // ▶  Start
 // ─────────────────────────────────────────────────────────────
@@ -454,6 +478,7 @@ server.listen(PORT, () => {
   console.log(`📡  WebSocket relay ready`);
   console.log(`📂  Serving web app from: ${PUBLIC}`);
   console.log(`💾  Data file: ${DATA_FILE}\n`);
+  startUdpBroadcast();
 });
 
 server.on('error', (e) => {

@@ -23,6 +23,27 @@ const APP = {
   accel   : { x: 0, y: 0, z: 0 },
   detected: null,
 
+  // Gyroscope-Only IMU state
+  gyroRaw: { x: 0, y: 0, z: 0 },
+  gyroCalibrated: { x: 0, y: 0, z: 0 },
+  gyroOffsets: { x: 0, y: 0, z: 0 },
+  gyroCalibrating: false,
+  gyroCalibrationSamples: [],
+  gyroLastTimestamp: 0,
+  
+  // Axis remapping configurations (startup presets)
+  remap: {
+    xSrc: 'x', xInv: true,  // Logical X (Roll) = -Physical X
+    ySrc: 'y', yInv: false, // Logical Y (Pitch) = Physical Y
+    zSrc: 'z', zInv: true   // Logical Z (Yaw) = -Physical Z
+  },
+  viewMode: 'cube', // 'cube' or 'board'
+  chartBuffer: {
+    x: Array(200).fill(0),
+    y: Array(200).fill(0),
+    z: Array(200).fill(0)
+  },
+
   // Library
   library : {},
   libVersion : 1,
@@ -136,10 +157,15 @@ function handleMessage(msg) {
       onSensorData(msg);
       break;
 
-    case 'esp32_status':
+    case 'esp32_status': {
+      const wasConnected = APP.esp32Ok;
       APP.esp32Ok = !!msg.connected;
       updateESP32Dot(APP.esp32Ok);
+      if (APP.esp32Ok && !wasConnected) {
+        startGyroCalibration();
+      }
       break;
+    }
 
     case 'library_update':
       setLibrary(msg.data || {}, msg.version, msg.last_updated);
@@ -195,10 +221,44 @@ function updateESP32Dot(ok) {
 // ═══════════════════════════════════════════════════════════════
 function onSensorData(data) {
   APP.flex  = data.flex  || APP.flex;
-  APP.pitch = data.pitch ?? APP.pitch;
-  APP.roll  = data.roll  ?? APP.roll;
-  APP.yaw   = data.yaw   ?? APP.yaw;
   APP.accel = data.accel || APP.accel;
+
+  // Process Gyroscope-Only IMU data
+  APP.gyroRaw = data.gyro || { x: 0, y: 0, z: 0 };
+  let remapped = applyGyroRemapping(APP.gyroRaw);
+  
+  if (APP.gyroCalibrating) {
+    handleGyroCalibration(remapped);
+  } else {
+    // Subtract calibrated bias offsets
+    let gx_cal = remapped.x - APP.gyroOffsets.x;
+    let gy_cal = remapped.y - APP.gyroOffsets.y;
+    let gz_cal = remapped.z - APP.gyroOffsets.z;
+
+    // Apply noise gate / deadband to filter out micro-drift
+    const DEADBAND = 0.4;
+    APP.gyroCalibrated.x = Math.abs(gx_cal) < DEADBAND ? 0 : gx_cal;
+    APP.gyroCalibrated.y = Math.abs(gy_cal) < DEADBAND ? 0 : gy_cal;
+    APP.gyroCalibrated.z = Math.abs(gz_cal) < DEADBAND ? 0 : gz_cal;
+
+    // Perform pure dead-reckoning integration to estimate current orientation
+    const nowTime = performance.now();
+    if (APP.gyroLastTimestamp === 0) {
+      APP.gyroLastTimestamp = nowTime;
+    } else {
+      const dt = (nowTime - APP.gyroLastTimestamp) / 1000;
+      APP.gyroLastTimestamp = nowTime;
+      if (dt < 0.2) { // Guard against giant time jumps
+        APP.roll  += APP.gyroCalibrated.x * dt;
+        APP.pitch += APP.gyroCalibrated.y * dt;
+        APP.yaw   += APP.gyroCalibrated.z * dt;
+      }
+    }
+
+    // Update telemetry charts buffers
+    updateChartBuffers(APP.gyroCalibrated.x, APP.gyroCalibrated.y, APP.gyroCalibrated.z);
+    updateGyroUI();
+  }
 
   // Auto-mark ESP32 online when data arrives (handles missed identify)
   if (!APP.esp32Ok) {
@@ -253,7 +313,8 @@ function onSensorData(data) {
 // ═══════════════════════════════════════════════════════════════
 // ▶  Three.js — 3D Orientation Cube
 // ═══════════════════════════════════════════════════════════════
-let THREE_scene, THREE_camera, THREE_renderer, THREE_cube;
+let THREE_scene, THREE_camera, THREE_renderer, THREE_group, THREE_activeModel;
+let THREE_cubeMesh, THREE_boardMesh;
 
 function initCube() {
   const container = document.getElementById('cube-container');
@@ -288,10 +349,12 @@ function initCube() {
   dirC.position.set(0, -6, -3);
   THREE_scene.add(dirC);
 
-  // ── Cube ────────────────────────────────────────────────────
-  const geo = new THREE.BoxGeometry(2, 2, 2);
+  // ── Group ───────────────────────────────────────────────────
+  THREE_group = new THREE.Group();
+  THREE_scene.add(THREE_group);
 
-  // Face letters as canvas textures
+  // ── Build Cube Model ────────────────────────────────────────
+  const geo = new THREE.BoxGeometry(2, 2, 2);
   const faceLabels = ['R', 'L', 'T', 'B', 'F', 'K'];
   const faceColors = [
     0x7c5cfc, 0x5a40d8,
@@ -304,9 +367,14 @@ function initCube() {
       map: makeTextTexture(faceLabels[i], col),
     })
   );
+  THREE_cubeMesh = new THREE.Mesh(geo, materials);
 
-  THREE_cube = new THREE.Mesh(geo, materials);
-  THREE_scene.add(THREE_cube);
+  // ── Build Board Model ───────────────────────────────────────
+  buildBoardModel();
+
+  // ── Set default model ──────────────────────────────────────
+  THREE_activeModel = THREE_cubeMesh;
+  THREE_group.add(THREE_activeModel);
 
   // ── Grid ────────────────────────────────────────────────────
   const grid = new THREE.GridHelper(8, 8, 0x2a2a5a, 0x1a1a3a);
@@ -335,6 +403,74 @@ function initCube() {
   ro.observe(container);
 }
 
+function buildBoardModel() {
+  THREE_boardMesh = new THREE.Group();
+  
+  // PCB Substrate (Green board)
+  const pcbGeo = new THREE.BoxGeometry(1.8, 0.08, 3.0);
+  const pcbMat = new THREE.MeshPhongMaterial({ color: 0x064e3b, shininess: 30 });
+  const pcb = new THREE.Mesh(pcbGeo, pcbMat);
+  THREE_boardMesh.add(pcb);
+  
+  // Gold connection pins along the sides
+  const pinMat = new THREE.MeshPhongMaterial({ color: 0xd97706, metalness: 0.9, roughness: 0.1 });
+  const pinGeo = new THREE.BoxGeometry(0.1, 0.1, 0.06);
+  for (let z = -1.3; z <= 1.3; z += 0.2) {
+    const pinL = new THREE.Mesh(pinGeo, pinMat);
+    pinL.position.set(-0.85, 0, z);
+    THREE_boardMesh.add(pinL);
+    
+    const pinR = new THREE.Mesh(pinGeo, pinMat);
+    pinR.position.set(0.85, 0, z);
+    THREE_boardMesh.add(pinR);
+  }
+  
+  // ESP32-S3 Module (Metallic main chip)
+  const espGeo = new THREE.BoxGeometry(1.0, 0.12, 1.1);
+  const espMat = new THREE.MeshPhongMaterial({ color: 0x27272a, metalness: 0.8, roughness: 0.2 });
+  const esp = new THREE.Mesh(espGeo, espMat);
+  esp.position.set(0, 0.08, 0.4);
+  THREE_boardMesh.add(esp);
+  
+  // MPU6050 (Small black chip)
+  const imuGeo = new THREE.BoxGeometry(0.4, 0.08, 0.4);
+  const imuMat = new THREE.MeshPhongMaterial({ color: 0x18181b, shininess: 80 });
+  const imu = new THREE.Mesh(imuGeo, imuMat);
+  imu.position.set(0, 0.06, -0.6);
+  THREE_boardMesh.add(imu);
+  
+  // White screenprint arrow on PCB
+  const arrowGeo = new THREE.ConeGeometry(0.12, 0.3, 4);
+  const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+  arrow.rotation.x = -Math.PI / 2;
+  arrow.position.set(0, 0.051, -1.0);
+  THREE_boardMesh.add(arrow);
+  
+  const shaftGeo = new THREE.BoxGeometry(0.05, 0.01, 0.3);
+  const shaft = new THREE.Mesh(shaftGeo, arrowMat);
+  shaft.position.set(0, 0.051, -0.8);
+  THREE_boardMesh.add(shaft);
+  
+  // USB-C Connector (Metallic silver)
+  const usbGeo = new THREE.BoxGeometry(0.5, 0.15, 0.3);
+  const usbMat = new THREE.MeshPhongMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.15 });
+  const usb = new THREE.Mesh(usbGeo, usbMat);
+  usb.position.set(0, 0.05, -1.45);
+  THREE_boardMesh.add(usb);
+}
+
+function setActiveModel(mode) {
+  if (!THREE_group) return;
+  THREE_group.remove(THREE_activeModel);
+  if (mode === 'cube') {
+    THREE_activeModel = THREE_cubeMesh;
+  } else {
+    THREE_activeModel = THREE_boardMesh;
+  }
+  THREE_group.add(THREE_activeModel);
+}
+
 function makeTextTexture(text, baseColor) {
   const canvas = document.createElement('canvas');
   canvas.width = 128; canvas.height = 128;
@@ -356,10 +492,17 @@ function makeTextTexture(text, baseColor) {
 }
 
 function updateCube(pitch, roll, yaw) {
-  if (!THREE_cube) return;   // only skip if Three.js not ready
-  THREE_cube.rotation.x =  pitch * (Math.PI / 180);
-  THREE_cube.rotation.z =  roll  * (Math.PI / 180);
-  THREE_cube.rotation.y =  yaw   * (Math.PI / 180);
+  if (!THREE_group) return;   // only skip if Three.js group not ready
+  const pitchRad = pitch * (Math.PI / 180);
+  const rollRad  = roll  * (Math.PI / 180);
+  const yawRad   = yaw   * (Math.PI / 180);
+  
+  THREE_group.rotation.set(0, 0, 0);
+  THREE_group.rotation.order = 'YXZ';
+  
+  THREE_group.rotation.x = pitchRad;
+  THREE_group.rotation.y = -yawRad; // Invert yaw to match standard visual expectation
+  THREE_group.rotation.z = -rollRad; // Invert roll to match visual bank direction
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -368,10 +511,314 @@ function updateCube(pitch, roll, yaw) {
 function updateAngleDisplay() {
   document.getElementById('val-pitch').textContent = APP.pitch.toFixed(1) + '°';
   document.getElementById('val-roll').textContent  = APP.roll.toFixed(1)  + '°';
-  document.getElementById('val-yaw').textContent   = APP.yaw.toFixed(1)   + '°';
+  document.getElementById('val-yaw').textContent   = ((APP.yaw % 360 + 360) % 360).toFixed(1)   + '°';
   document.getElementById('val-ax').textContent    = APP.accel.x.toFixed(2);
   document.getElementById('val-ay').textContent    = APP.accel.y.toFixed(2);
   document.getElementById('val-az').textContent    = APP.accel.z.toFixed(2);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ▶  Gyroscope-Only IMU Logic
+// ═══════════════════════════════════════════════════════════════
+
+function applyGyroRemapping(raw) {
+  const remapped = { x: 0, y: 0, z: 0 };
+  
+  const mapX = APP.remap.xSrc;
+  const invX = APP.remap.xInv ? -1 : 1;
+  
+  const mapY = APP.remap.ySrc;
+  const invY = APP.remap.yInv ? -1 : 1;
+  
+  const mapZ = APP.remap.zSrc;
+  const invZ = APP.remap.zInv ? -1 : 1;
+  
+  remapped.x = raw[mapX] * invX;
+  remapped.y = raw[mapY] * invY;
+  remapped.z = raw[mapZ] * invZ;
+  
+  return remapped;
+}
+
+function startGyroCalibration() {
+  APP.gyroCalibrating = true;
+  APP.gyroCalibrationSamples = [];
+  const btn = document.getElementById('btn-tare-gyro');
+  if (btn) {
+    btn.classList.add('active');
+    btn.style.background = 'rgba(0, 240, 255, 0.1)';
+    btn.style.borderColor = 'var(--color-z)';
+    btn.querySelector('span').textContent = 'Calibrating (0%)…';
+  }
+  showToast('Calibration started. Keep the IMU glove still.', 'info');
+}
+
+function handleGyroCalibration(remapped) {
+  APP.gyroCalibrationSamples.push({ ...remapped });
+  const targetSamples = 200;
+  const progress = Math.round((APP.gyroCalibrationSamples.length / targetSamples) * 100);
+  
+  const btn = document.getElementById('btn-tare-gyro');
+  if (btn) {
+    btn.querySelector('span').textContent = `Calibrating (${progress}%)…`;
+  }
+  
+  if (APP.gyroCalibrationSamples.length >= targetSamples) {
+    const sums = { x: 0, y: 0, z: 0 };
+    APP.gyroCalibrationSamples.forEach(s => {
+      sums.x += s.x;
+      sums.y += s.y;
+      sums.z += s.z;
+    });
+    
+    const count = APP.gyroCalibrationSamples.length;
+    APP.gyroOffsets.x = sums.x / count;
+    APP.gyroOffsets.y = sums.y / count;
+    APP.gyroOffsets.z = sums.z / count;
+    
+    APP.gyroCalibrating = false;
+    APP.gyroCalibrationSamples = [];
+    
+    if (btn) {
+      btn.classList.remove('active');
+      btn.style.background = 'transparent';
+      btn.style.borderColor = 'var(--glass-border)';
+      btn.querySelector('span').textContent = 'Tare Gyro Bias';
+    }
+    
+    resetGyroOrientation();
+    showToast('Gyro calibration done successfully!', 'success');
+  }
+}
+
+function resetGyroOrientation() {
+  APP.pitch = 0;
+  APP.roll  = 0;
+  APP.yaw   = 0;
+  showToast('Orientation reset to 0°', 'success');
+}
+
+function updateGyroUI() {
+  const valGx = document.getElementById('val-gx');
+  const valGy = document.getElementById('val-gy');
+  const valGz = document.getElementById('val-gz');
+  
+  if (valGx) valGx.textContent = APP.gyroCalibrated.x.toFixed(1);
+  if (valGy) valGy.textContent = APP.gyroCalibrated.y.toFixed(1);
+  if (valGz) valGz.textContent = APP.gyroCalibrated.z.toFixed(1);
+  
+  const mapToPercent = (val, max) => Math.min(100, Math.max(0, (Math.abs(val) / max) * 100));
+  
+  const barGx = document.getElementById('bar-gx');
+  const barGy = document.getElementById('bar-gy');
+  const barGz = document.getElementById('bar-gz');
+  
+  if (barGx) barGx.style.width = `${mapToPercent(APP.gyroCalibrated.x, 250)}%`;
+  if (barGy) barGy.style.width = `${mapToPercent(APP.gyroCalibrated.y, 250)}%`;
+  if (barGz) barGz.style.width = `${mapToPercent(APP.gyroCalibrated.z, 250)}%`;
+}
+
+function updateChartBuffers(x, y, z) {
+  APP.chartBuffer.x.push(x);
+  APP.chartBuffer.x.shift();
+  APP.chartBuffer.y.push(y);
+  APP.chartBuffer.y.shift();
+  APP.chartBuffer.z.push(z);
+  APP.chartBuffer.z.shift();
+}
+
+let chartContext = null;
+let chartAnimationId = null;
+
+function initChart() {
+  const canvas = document.getElementById('chart-canvas');
+  if (!canvas) return;
+  canvas.width = canvas.parentElement.clientWidth;
+  canvas.height = canvas.parentElement.clientHeight;
+  chartContext = canvas.getContext('2d');
+  
+  window.addEventListener('resize', () => {
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+  });
+  
+  renderChart();
+}
+
+function renderChart() {
+  chartAnimationId = requestAnimationFrame(renderChart);
+  if (!chartContext) return;
+  
+  const ctx = chartContext;
+  const canvas = document.getElementById('chart-canvas');
+  if (!canvas) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  
+  ctx.clearRect(0, 0, w, h);
+  
+  // Grid Lines
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+  ctx.lineWidth = 1;
+  const gridLines = 4;
+  for (let i = 1; i < gridLines; i++) {
+    const yPos = (h / gridLines) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, yPos);
+    ctx.lineTo(w, yPos);
+    ctx.stroke();
+    
+    if (i === 2) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath();
+      ctx.moveTo(0, yPos);
+      ctx.lineTo(w, yPos);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    }
+  }
+  
+  const scale = h / 600;
+  
+  const drawLine = (dataBuffer, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    
+    const len = dataBuffer.length;
+    const step = w / (len - 1);
+    
+    for (let i = 0; i < len; i++) {
+      let val = dataBuffer[i];
+      let yVal = (h / 2) - (val * scale);
+      yVal = Math.max(2, Math.min(h - 2, yVal));
+      
+      if (i === 0) {
+        ctx.moveTo(0, yVal);
+      } else {
+        ctx.lineTo(i * step, yVal);
+      }
+    }
+    ctx.stroke();
+    
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  };
+  
+  drawLine(APP.chartBuffer.x, '#ff3366'); // X axis
+  drawLine(APP.chartBuffer.y, '#00ff87'); // Y axis
+  drawLine(APP.chartBuffer.z, '#00f0ff'); // Z axis
+}
+
+function initGyroIMU() {
+  const btnCube = document.getElementById('btn-view-cube');
+  const btnBoard = document.getElementById('btn-view-board');
+  if (btnCube && btnBoard) {
+    btnCube.onclick = () => {
+      btnCube.classList.add('active');
+      btnCube.style.background = 'rgba(124,92,252,0.15)';
+      btnCube.style.color = 'var(--accent-1)';
+      btnBoard.classList.remove('active');
+      btnBoard.style.background = 'rgba(0,0,0,0.3)';
+      btnBoard.style.color = 'var(--text-secondary)';
+      APP.viewMode = 'cube';
+      setActiveModel('cube');
+    };
+    btnBoard.onclick = () => {
+      btnBoard.classList.add('active');
+      btnBoard.style.background = 'rgba(124,92,252,0.15)';
+      btnBoard.style.color = 'var(--accent-1)';
+      btnCube.classList.remove('active');
+      btnCube.style.background = 'rgba(0,0,0,0.3)';
+      btnCube.style.color = 'var(--text-secondary)';
+      APP.viewMode = 'board';
+      setActiveModel('board');
+    };
+  }
+
+  const btnTare = document.getElementById('btn-tare-gyro');
+  if (btnTare) {
+    btnTare.onclick = () => {
+      startGyroCalibration();
+    };
+  }
+  const btnReset = document.getElementById('btn-reset-view');
+  if (btnReset) {
+    btnReset.onclick = () => {
+      resetGyroOrientation();
+    };
+  }
+
+  const mapX = document.getElementById('remap-x-src');
+  const mapY = document.getElementById('remap-y-src');
+  const mapZ = document.getElementById('remap-z-src');
+  const invX = document.getElementById('remap-x-inv');
+  const invY = document.getElementById('remap-y-inv');
+  const invZ = document.getElementById('remap-z-inv');
+
+  const updateRemapConfig = () => {
+    if (mapX) APP.remap.xSrc = mapX.value;
+    if (mapY) APP.remap.ySrc = mapY.value;
+    if (mapZ) APP.remap.zSrc = mapZ.value;
+    if (invX) APP.remap.xInv = invX.checked;
+    if (invY) APP.remap.yInv = invY.checked;
+    if (invZ) APP.remap.zInv = invZ.checked;
+  };
+
+  [mapX, mapY, mapZ, invX, invY, invZ].forEach(el => {
+    if (el) el.addEventListener('change', updateRemapConfig);
+  });
+
+  const presetDefault = document.getElementById('btn-preset-default');
+  const presetSideways = document.getElementById('btn-preset-sideways');
+  const presetFlat = document.getElementById('btn-preset-inverted');
+
+  const setPresetUI = (px, ix, py, iy, pz, iz) => {
+    if (mapX) mapX.value = px;
+    if (invX) invX.checked = ix;
+    if (mapY) mapY.value = py;
+    if (invY) invY.checked = iy;
+    if (mapZ) mapZ.value = pz;
+    if (invZ) invZ.checked = iz;
+    updateRemapConfig();
+  };
+
+  const clearPresetsActive = () => {
+    [presetDefault, presetSideways, presetFlat].forEach(p => {
+      if (p) p.classList.remove('active');
+    });
+  };
+
+  if (presetDefault) {
+    presetDefault.onclick = () => {
+      clearPresetsActive();
+      presetDefault.classList.add('active');
+      setPresetUI('x', true, 'y', false, 'z', true);
+      showToast('Loaded default remapping preset', 'info');
+    };
+  }
+  if (presetSideways) {
+    presetSideways.onclick = () => {
+      clearPresetsActive();
+      presetSideways.classList.add('active');
+      setPresetUI('y', false, 'x', true, 'z', false);
+      showToast('Loaded sideways remapping preset', 'info');
+    };
+  }
+  if (presetFlat) {
+    presetFlat.onclick = () => {
+      clearPresetsActive();
+      presetFlat.classList.add('active');
+      setPresetUI('x', false, 'y', false, 'z', false);
+      showToast('Loaded flat/normal remapping preset', 'info');
+    };
+  }
+
+  initChart();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -963,8 +1410,9 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  // 3D cube
+  // 3D cube & Gyro IMU
   initCube();
+  initGyroIMU();
 
   // Flex bar groups
   initFlexBars('flex-bars');

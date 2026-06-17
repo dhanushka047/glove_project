@@ -18,6 +18,7 @@
 #include <LittleFS.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <WiFiUdp.h>
 #include "mpu6050_helper.h"
 
 // ═══════════════════════════════════════════════════════════════
@@ -28,7 +29,7 @@
 
 // Laptop gets 192.168.4.2 from ESP32 DHCP — Node.js server runs there
 const char* SERVER_HOST = "192.168.4.2";
-const int   SERVER_PORT = 3000;
+const int   SERVER_PORT = 3001;
 
 // ═══════════════════════════════════════════════════════════════
 // ▶  Pin Definitions
@@ -247,19 +248,10 @@ void readSensors() {
   curFlex[3] = (float)analogRead(PIN_FLEX_RING);
   curFlex[4] = (float)analogRead(PIN_FLEX_PINKY);
   
-  // Calculate orientation angles (pitch & roll) directly from raw accelerometer values (g's)
-  // to avoid gyro drift and complementary filter latency during height/motion changes.
-  float ax = imu.accelX;
-  float ay = imu.accelY;
-  float az = imu.accelZ;
-  
-  // Guard division by zero or extreme tilts
-  float denominator = sqrtf(ax * ax + az * az);
-  if (denominator < 0.001f) denominator = 0.001f;
-  
-  curPitch = atan2f(ay, denominator) * 180.0f / M_PI;
-  curRoll  = atan2f(-ax, sqrtf(ay * ay + az * az)) * 180.0f / M_PI;
-  curYaw   = imu.yaw; // Keep complementary filtered yaw for visual tracking (e.g. 3D cube)
+  // Use pure gyroscope dead-reckoning integration from the helper class
+  curPitch = imu.pitch;
+  curRoll  = imu.roll;
+  curYaw   = imu.yaw;
 }
 
 // ═══════════════════════════════════════════════════════════════

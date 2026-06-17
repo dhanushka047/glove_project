@@ -101,6 +101,10 @@
         <div class="glass-card cube-card">
           <div class="card-header">
             <h2 class="card-title">Hand Orientation</h2>
+            <div class="view-modes" style="display: flex; gap: 4px;">
+              <button id="btn-view-cube" class="btn btn-icon-only active" title="Show Cube View" style="padding: 4px 10px; font-size: 10px; font-weight: 700; border-radius: var(--radius-sm); border: 1px solid var(--glass-border); cursor: pointer; background: rgba(124,92,252,0.1); color: var(--accent-1);">CUBE</button>
+              <button id="btn-view-board" class="btn btn-icon-only" title="Show ESP32 Board View" style="padding: 4px 10px; font-size: 10px; font-weight: 700; border-radius: var(--radius-sm); border: 1px solid var(--glass-border); cursor: pointer; background: rgba(0, 0, 0, 0.3); color: var(--text-secondary);">BOARD</button>
+            </div>
             <span class="card-chip">MPU6050</span>
           </div>
           <div id="cube-container" aria-label="3D orientation visualization"></div>
@@ -119,9 +123,143 @@
             </div>
           </div>
           <div class="accel-row" id="accel-row">
-            <span class="accel-chip">Ax: <b id="val-ax">0.00</b>g</span>
-            <span class="accel-chip">Ay: <b id="val-ay">0.00</b>g</span>
-            <span class="accel-chip">Az: <b id="val-az">0.00</b>g</span>
+            <span class="accel-chip" title="Accelerometer measurements (skipped in gyro-only mode)">Ax: <b id="val-ax">0.00</b>g (Skipped)</span>
+            <span class="accel-chip" title="Accelerometer measurements (skipped in gyro-only mode)">Ay: <b id="val-ay">0.00</b>g</span>
+            <span class="accel-chip" title="Accelerometer measurements (skipped in gyro-only mode)">Az: <b id="val-az">0.00</b>g</span>
+          </div>
+        </div>
+
+        <!-- IMU Config & Controls (Gyroscope-Only) -->
+        <div class="glass-card imu-config-card">
+          <div class="card-header">
+            <h2 class="card-title">IMU Configuration & Axis Remap</h2>
+          </div>
+          
+          <div class="settings-group" style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--glass-border);">
+            <h3 style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-primary); margin-bottom: 6px;">Calibration</h3>
+            <p class="settings-info" style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-bottom: 10px;">Place the sensor flat and motionless on a stable surface before taring.</p>
+            <div class="button-row" style="display: flex; gap: 8px;">
+              <button id="btn-tare-gyro" class="btn btn-outline btn-sm" style="flex: 1;">
+                <span>Tare Gyro Bias</span>
+              </button>
+              <button id="btn-reset-view" class="btn btn-outline btn-sm" style="flex: 1;">
+                <span>Reset Orientation</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3 style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-primary); margin-bottom: 6px;">Axis Remapping</h3>
+            <p class="settings-info" style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-bottom: 10px;">Map physical sensor orientations to your project's coordinate framework.</p>
+
+            <div class="remapping-container">
+              <!-- Header -->
+              <div class="remap-grid-header">
+                <div>Logical</div>
+                <div>Physical Source</div>
+                <div class="center-align">Invert</div>
+              </div>
+
+              <!-- Remap X -->
+              <div class="remap-row">
+                <div class="axis-label axis-x">Logical X (Roll)</div>
+                <div class="select-wrapper">
+                  <select id="remap-x-src" class="text-input" style="padding: 4px 8px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm);">
+                    <option value="x" selected>Physical X</option>
+                    <option value="y">Physical Y</option>
+                    <option value="z">Physical Z</option>
+                  </select>
+                </div>
+                <div class="center-align">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="remap-x-inv" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Remap Y -->
+              <div class="remap-row">
+                <div class="axis-label axis-y">Logical Y (Pitch)</div>
+                <div class="select-wrapper">
+                  <select id="remap-y-src" class="text-input" style="padding: 4px 8px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm);">
+                    <option value="x">Physical X</option>
+                    <option value="y" selected>Physical Y</option>
+                    <option value="z">Physical Z</option>
+                  </select>
+                </div>
+                <div class="center-align">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="remap-y-inv">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Remap Z -->
+              <div class="remap-row">
+                <div class="axis-label axis-z">Logical Z (Yaw)</div>
+                <div class="select-wrapper">
+                  <select id="remap-z-src" class="text-input" style="padding: 4px 8px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm);">
+                    <option value="x">Physical X</option>
+                    <option value="y">Physical Y</option>
+                    <option value="z" selected>Physical Z</option>
+                  </select>
+                </div>
+                <div class="center-align">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="remap-z-inv" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            
+            <div class="preset-row">
+              <button id="btn-preset-default" class="btn btn-tiny active">DEFAULT</button>
+              <button id="btn-preset-sideways" class="btn btn-tiny">SIDEWAYS</button>
+              <button id="btn-preset-inverted" class="btn btn-tiny">FLAT / NORMAL</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gyroscope Telemetry & Charts -->
+        <div class="glass-card gyro-telemetry-card">
+          <div class="card-header">
+            <h2 class="card-title">Real-Time Gyroscope Stream (°/s)</h2>
+          </div>
+          
+          <div class="telemetry-section" style="margin-bottom: 12px;">
+            <div class="section-title">
+              <span>GYROSCOPE RATES</span>
+              <span class="unit">(°/s)</span>
+            </div>
+            <div class="metric-row">
+              <div class="metric-card card-x">
+                <span class="metric-axis">X</span>
+                <span class="metric-value" id="val-gx">0.0</span>
+                <div class="metric-bar-container"><div id="bar-gx" class="metric-bar"></div></div>
+              </div>
+              <div class="metric-card card-y">
+                <span class="metric-axis">Y</span>
+                <span class="metric-value" id="val-gy">0.0</span>
+                <div class="metric-bar-container"><div id="bar-gy" class="metric-bar"></div></div>
+              </div>
+              <div class="metric-card card-z">
+                <span class="metric-axis">Z</span>
+                <span class="metric-value" id="val-gz">0.0</span>
+                <div class="metric-bar-container"><div id="bar-gz" class="metric-bar"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart-container">
+            <canvas id="chart-canvas"></canvas>
+            <div class="chart-legend">
+              <div class="legend-item"><span class="legend-dot dot-x"></span><span>Remapped X</span></div>
+              <div class="legend-item"><span class="legend-dot dot-y"></span><span>Remapped Y</span></div>
+              <div class="legend-item"><span class="legend-dot dot-z"></span><span>Remapped Z</span></div>
+            </div>
           </div>
         </div>
 
