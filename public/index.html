@@ -236,6 +236,16 @@
             </div>
             <p class="settings-info" style="margin-bottom: 10px;">Map physical ADC channels to logical fingers.</p>
 
+            <!-- Snapshot Calibration Buttons -->
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+              <button id="btn-flex-snap-open" class="btn btn-tiny" style="flex: 1; font-size: 11px; padding: 6px; display: flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid rgba(0, 229, 255, 0.25); background: rgba(0, 229, 255, 0.05); color: #00e5ff; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s ease;">
+                <span>🖐️</span> <span>Snap Open (0%)</span>
+              </button>
+              <button id="btn-flex-snap-bent" class="btn btn-tiny" style="flex: 1; font-size: 11px; padding: 6px; display: flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid rgba(124, 92, 252, 0.25); background: rgba(124, 92, 252, 0.05); color: #7c5cfc; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s ease;">
+                <span>✊</span> <span>Snap Bent (100%)</span>
+              </button>
+            </div>
+
             <!-- Auto Detect Status Bar -->
             <div id="auto-detect-banner" style="display: none; align-items: center; gap: 8px; background: rgba(0, 240, 100, 0.07); border: 1px solid rgba(0, 240, 100, 0.25); border-radius: 8px; padding: 7px 12px; margin-bottom: 10px; font-size: 11px;">
               <span style="width: 8px; height: 8px; border-radius: 50%; background: #00f064; display: inline-block; animation: pulse-dot 1s ease-in-out infinite;"></span>
@@ -245,16 +255,17 @@
 
             <div class="remapping-container">
               <!-- Header -->
-              <div class="remap-grid-header" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+              <div class="remap-grid-header" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px 40px; gap: 6px; font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.06);">
                 <div>Finger</div>
                 <div>ADC Source</div>
                 <div style="text-align: center;">Raw</div>
                 <div style="text-align: center;">Min</div>
                 <div style="text-align: center;">Max</div>
+                <div style="text-align: center;">Live %</div>
               </div>
 
               <!-- Thumb -->
-              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px 40px; gap: 6px; align-items: center; padding: 4px 0;">
                 <div class="axis-label" style="color: #7c5cfc; font-weight: 500; font-size: 11px;">Thumb</div>
                 <div class="select-wrapper">
                   <select id="remap-flex-thumb" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
@@ -272,10 +283,11 @@
                 <div>
                   <input type="number" id="limit-flex-thumb-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
                 </div>
+                <div id="pct-flex-thumb-val" style="font-family: monospace; font-size: 11px; text-align: center; color: #00e5ff; font-weight: 600;">0%</div>
               </div>
 
               <!-- Index -->
-              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px 40px; gap: 6px; align-items: center; padding: 4px 0;">
                 <div class="axis-label" style="color: #2979ff; font-weight: 500; font-size: 11px;">Index</div>
                 <div class="select-wrapper">
                   <select id="remap-flex-index" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
@@ -293,10 +305,11 @@
                 <div>
                   <input type="number" id="limit-flex-index-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
                 </div>
+                <div id="pct-flex-index-val" style="font-family: monospace; font-size: 11px; text-align: center; color: #2979ff; font-weight: 600;">0%</div>
               </div>
 
               <!-- Middle -->
-              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px 40px; gap: 6px; align-items: center; padding: 4px 0;">
                 <div class="axis-label" style="color: #00bcd4; font-weight: 500; font-size: 11px;">Middle</div>
                 <div class="select-wrapper">
                   <select id="remap-flex-middle" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
@@ -314,10 +327,11 @@
                 <div>
                   <input type="number" id="limit-flex-middle-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
                 </div>
+                <div id="pct-flex-middle-val" style="font-family: monospace; font-size: 11px; text-align: center; color: #00bcd4; font-weight: 600;">0%</div>
               </div>
 
               <!-- Ring -->
-              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px 40px; gap: 6px; align-items: center; padding: 4px 0;">
                 <div class="axis-label" style="color: #00e676; font-weight: 500; font-size: 11px;">Ring</div>
                 <div class="select-wrapper">
                   <select id="remap-flex-ring" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
@@ -335,10 +349,11 @@
                 <div>
                   <input type="number" id="limit-flex-ring-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
                 </div>
+                <div id="pct-flex-ring-val" style="font-family: monospace; font-size: 11px; text-align: center; color: #00e676; font-weight: 600;">0%</div>
               </div>
 
               <!-- Pinky -->
-              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px; gap: 6px; align-items: center; padding: 4px 0;">
+              <div class="remap-row" style="display: grid; grid-template-columns: 55px 1fr 45px 45px 45px 40px; gap: 6px; align-items: center; padding: 4px 0;">
                 <div class="axis-label" style="color: #ff9100; font-weight: 500; font-size: 11px;">Pinky</div>
                 <div class="select-wrapper">
                   <select id="remap-flex-pinky" class="text-input" style="padding: 4px 6px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%;">
@@ -356,6 +371,7 @@
                 <div>
                   <input type="number" id="limit-flex-pinky-max" class="text-input" value="4000" style="padding: 4px; font-size: 11px; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: var(--radius-sm); width: 100%; text-align: center;">
                 </div>
+                <div id="pct-flex-pinky-val" style="font-family: monospace; font-size: 11px; text-align: center; color: #ff9100; font-weight: 600;">0%</div>
               </div>
             </div>
           </div>

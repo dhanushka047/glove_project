@@ -11,7 +11,18 @@
 const APP = {
   // Connection
   ws      : null,
-  wsUrl   : localStorage.getItem('glove_ws_url') || `ws://${location.hostname || 'localhost'}:${location.port || 3000}`,
+  wsUrl   : (() => {
+    const saved = localStorage.getItem('glove_ws_url');
+    try {
+      if (saved) {
+        const u = new URL(saved.replace(/^ws(s?):\/\//, 'http$1://'));
+        if (u.hostname === location.hostname && u.port !== location.port) {
+          return `ws://${location.host}`;
+        }
+      }
+    } catch (e) {}
+    return saved || `ws://${location.host || 'localhost:3001'}`;
+  })(),
   serverOk: false,
   esp32Ok : false,
 
@@ -20,6 +31,8 @@ const APP = {
   pitch   : 0,
   roll    : 0,
   yaw     : 0,
+  rawOrientation: { pitch: 0, roll: 0, yaw: 0 },
+  orientationOffsets: { pitch: 0, roll: 0, yaw: 0 },
   accel   : { x: 0, y: 0, z: 0 },
   detected: null,
 
@@ -63,6 +76,8 @@ const APP = {
       pinky:  { min: null, max: null }
     }
   },
+  // Latest raw ADC snapshot — updated every sensor frame
+  flexRaw: { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 },
   viewMode: 'cube', // 'cube' or 'board'
   chartBuffer: {
     x: Array(200).fill(0),
@@ -126,6 +141,7 @@ function connectWS(url) {
   updateServerDot('connecting');
 
   try {
+    console.log('[WS] Attempting connection to:', APP.wsUrl);
     APP.ws = new WebSocket(APP.wsUrl);
   } catch (e) {
     console.warn('[WS] Cannot create socket:', e.message);
@@ -215,6 +231,18 @@ function handleMessage(msg) {
       showToast('Yaw reset to 0°', 'info');
       break;
 
+    case 'gyro_calibrated': {
+      const btn = document.getElementById('btn-tare-gyro');
+      if (btn) {
+        btn.classList.remove('active');
+        btn.style.background = 'transparent';
+        btn.style.borderColor = 'var(--glass-border)';
+        btn.querySelector('span').textContent = 'Tare Gyro Bias';
+      }
+      showToast('Gyro calibration done successfully!', 'success');
+      break;
+    }
+
     case 'library_cleared':
       setLibrary({});
       showToast('Library cleared on ESP32', 'warning');
@@ -274,6 +302,15 @@ function onSensorData(data) {
   if (rawRingEl) rawRingEl.textContent = Math.round(ringRaw);
   if (rawPinkyEl) rawPinkyEl.textContent = Math.round(pinkyRaw);
 
+  // Save latest raw values to APP state
+  APP.flexRaw = {
+    thumb: thumbRaw,
+    index: indexRaw,
+    middle: middleRaw,
+    ring: ringRaw,
+    pinky: pinkyRaw
+  };
+
   // Auto Detect: track live min/max for each finger and write back to inputs + APP state
   if (APP.autoDetect.active) {
     const FINGER_KEYS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
@@ -315,6 +352,14 @@ function onSensorData(data) {
     scaleFlex(ringRaw, APP.flexLimits.ring.min, APP.flexLimits.ring.max),
     scaleFlex(pinkyRaw, APP.flexLimits.pinky.min, APP.flexLimits.pinky.max)
   ];
+
+  // Update live percentage values in settings UI
+  const pcts = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  pcts.forEach((f, idx) => {
+    const el = document.getElementById(`pct-flex-${f}-val`);
+    if (el) el.textContent = Math.round(APP.flex[idx]) + '%';
+  });
+
   APP.accel = data.accel || APP.accel;
 
   // Auto-mark ESP32 online when data arrives (handles missed identify)
@@ -330,36 +375,33 @@ function onSensorData(data) {
   
   if (APP.gyroCalibrating) {
     handleGyroCalibration(remapped);
-  } else {
-    // Subtract calibrated bias offsets
-    let gx_cal = remapped.x - APP.gyroOffsets.x;
-    let gy_cal = remapped.y - APP.gyroOffsets.y;
-    let gz_cal = remapped.z - APP.gyroOffsets.z;
-
-    // Apply noise gate / deadband to filter out micro-drift
-    const DEADBAND = 0.4;
-    APP.gyroCalibrated.x = Math.abs(gx_cal) < DEADBAND ? 0 : gx_cal;
-    APP.gyroCalibrated.y = Math.abs(gy_cal) < DEADBAND ? 0 : gy_cal;
-    APP.gyroCalibrated.z = Math.abs(gz_cal) < DEADBAND ? 0 : gz_cal;
-
-    // Perform pure dead-reckoning integration to estimate current orientation
-    const nowTime = performance.now();
-    if (APP.gyroLastTimestamp === 0) {
-      APP.gyroLastTimestamp = nowTime;
-    } else {
-      const dt = (nowTime - APP.gyroLastTimestamp) / 1000;
-      APP.gyroLastTimestamp = nowTime;
-      if (dt < 0.2) { // Guard against giant time jumps
-        APP.roll  += APP.gyroCalibrated.x * dt;
-        APP.pitch += APP.gyroCalibrated.y * dt;
-        APP.yaw   += APP.gyroCalibrated.z * dt;
-      }
-    }
-
-    // Update telemetry charts buffers
-    updateChartBuffers(APP.gyroCalibrated.x, APP.gyroCalibrated.y, APP.gyroCalibrated.z);
-    updateGyroUI();
+    return;
   }
+  
+  // Subtract calibrated bias offsets (for display/chart purposes only)
+  let gx_cal = remapped.x - APP.gyroOffsets.x;
+  let gy_cal = remapped.y - APP.gyroOffsets.y;
+  let gz_cal = remapped.z - APP.gyroOffsets.z;
+
+  // Apply noise gate / deadband to filter out micro-drift
+  const DEADBAND = 0.8;
+  APP.gyroCalibrated.x = Math.abs(gx_cal) < DEADBAND ? 0 : gx_cal;
+  APP.gyroCalibrated.y = Math.abs(gy_cal) < DEADBAND ? 0 : gy_cal;
+  APP.gyroCalibrated.z = Math.abs(gz_cal) < DEADBAND ? 0 : gz_cal;
+
+  // Store absolute raw values from the ESP32
+  APP.rawOrientation.roll  = data.roll ?? 0;
+  APP.rawOrientation.pitch = data.pitch ?? 0;
+  APP.rawOrientation.yaw   = data.yaw ?? 0;
+
+  // Subtract current reference posture offsets to yield relative, drift-free angles (posture taring)
+  APP.roll  = APP.rawOrientation.roll - APP.orientationOffsets.roll;
+  APP.pitch = APP.rawOrientation.pitch - APP.orientationOffsets.pitch;
+  APP.yaw   = APP.rawOrientation.yaw - APP.orientationOffsets.yaw;
+
+  // Update telemetry charts buffers
+  updateChartBuffers(APP.gyroCalibrated.x, APP.gyroCalibrated.y, APP.gyroCalibrated.z);
+  updateGyroUI();
 
   // Rolling detection buffer — accumulate N live samples, then match
   APP.detectionBuf.push([...APP.flex]);
@@ -410,6 +452,84 @@ function onSensorData(data) {
 // ═══════════════════════════════════════════════════════════════
 let THREE_scene, THREE_camera, THREE_renderer, THREE_group, THREE_activeModel;
 let THREE_cubeMesh, THREE_boardMesh;
+
+function createCustomAxes() {
+  const axisGroup = new THREE.Group();
+  
+  const createArrow = (dir, color) => {
+    const origin = new THREE.Vector3(0, 0, 0);
+    const length = 2.5;
+    const arrow = new THREE.ArrowHelper(dir, origin, length, color, 0.25, 0.12);
+    return arrow;
+  };
+  
+  const createTextSprite = (text, color) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+    ctx.fillRect(0, 0, 64, 64);
+    
+    ctx.fillStyle = color;
+    ctx.font = 'bold 36px "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.fillText(text, 32, 32);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(0.5, 0.5, 1);
+    return sprite;
+  };
+  
+  // Map physical MPU6050 axes to Three.js view coordinates:
+  // - Physical X (longitudinal, forward) -> Three.js Z (Red)
+  // - Physical Y (lateral, right)         -> Three.js X (Green)
+  // - Physical Z (vertical, up)           -> Three.js Y (Blue)
+  const arrowX = createArrow(new THREE.Vector3(0, 0, 1), 0xff3366);
+  const arrowY = createArrow(new THREE.Vector3(1, 0, 0), 0x00ff87);
+  const arrowZ = createArrow(new THREE.Vector3(0, 1, 0), 0x00f0ff);
+  
+  axisGroup.add(arrowX);
+  axisGroup.add(arrowY);
+  axisGroup.add(arrowZ);
+  
+  // Floating Labels
+  const labelX = createTextSprite('X', '#ff3366');
+  labelX.position.set(0, 0, 2.8);
+  axisGroup.add(labelX);
+  
+  const labelY = createTextSprite('Y', '#00ff87');
+  labelY.position.set(2.8, 0, 0);
+  axisGroup.add(labelY);
+  
+  const labelZ = createTextSprite('Z', '#00f0ff');
+  labelZ.position.set(0, 2.8, 0);
+  axisGroup.add(labelZ);
+  
+  // Semi-transparent technical orbit rings
+  const ringGeo = new THREE.RingGeometry(2.45, 2.5, 64);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.04, transparent: true, side: THREE.DoubleSide });
+  
+  const ringXY = new THREE.Mesh(ringGeo, ringMat);
+  axisGroup.add(ringXY);
+  
+  const ringXZ = new THREE.Mesh(ringGeo, ringMat);
+  ringXZ.rotation.x = Math.PI / 2;
+  axisGroup.add(ringXZ);
+  
+  const ringYZ = new THREE.Mesh(ringGeo, ringMat);
+  ringYZ.rotation.y = Math.PI / 2;
+  axisGroup.add(ringYZ);
+  
+  return axisGroup;
+}
 
 function initCube() {
   const container = document.getElementById('cube-container');
@@ -476,9 +596,8 @@ function initCube() {
   grid.position.y = -1.8;
   THREE_scene.add(grid);
 
-  // ── Axes helper (small) ─────────────────────────────────────
-  const axes = new THREE.AxesHelper(1.5);
-  THREE_scene.add(axes);
+  // ── Custom High-Visibility Axes Guides (aligned with cube_test) ──
+  THREE_scene.add(createCustomAxes());
 
   // ── Animate loop ────────────────────────────────────────────
   function animate() {
@@ -638,6 +757,8 @@ function applyGyroRemapping(raw) {
 function startGyroCalibration() {
   APP.gyroCalibrating = true;
   APP.gyroCalibrationSamples = [];
+
+  sendWS({ type: 'calibrate_gyro' });
   const btn = document.getElementById('btn-tare-gyro');
   if (btn) {
     btn.classList.add('active');
@@ -645,12 +766,12 @@ function startGyroCalibration() {
     btn.style.borderColor = 'var(--color-z)';
     btn.querySelector('span').textContent = 'Calibrating (0%)…';
   }
-  showToast('Calibration started. Keep the IMU glove still.', 'info');
+  showToast('Calibration started. Keep the IMU glove still for 2s.', 'info');
 }
 
 function handleGyroCalibration(remapped) {
   APP.gyroCalibrationSamples.push({ ...remapped });
-  const targetSamples = 50;
+  const targetSamples = 100;
   const progress = Math.round((APP.gyroCalibrationSamples.length / targetSamples) * 100);
   
   const btn = document.getElementById('btn-tare-gyro');
@@ -687,11 +808,16 @@ function handleGyroCalibration(remapped) {
 }
 
 function resetGyroOrientation() {
+  APP.orientationOffsets.pitch = APP.rawOrientation.pitch;
+  APP.orientationOffsets.roll  = APP.rawOrientation.roll;
+  APP.orientationOffsets.yaw   = APP.rawOrientation.yaw;
+
   APP.pitch = 0;
   APP.roll  = 0;
   APP.yaw   = 0;
+  APP.gyroLastTimestamp = 0;
   sendWS({ type: 'reset_yaw' });
-  showToast('Orientation reset to 0°', 'success');
+  showToast('Reference posture set successfully!', 'success');
 }
 
 function updateGyroUI() {
@@ -1029,6 +1155,46 @@ function initGyroIMU() {
         if (maxEl) maxEl.value = defaults[f].max;
       });
       showToast('Flex limits reset to defaults', 'warning');
+    });
+  }
+
+  // ── Snapshot Open/Bent Calibration ──────────────────────────
+  const btnSnapOpen = document.getElementById('btn-flex-snap-open');
+  const btnSnapBent = document.getElementById('btn-flex-snap-bent');
+
+  if (btnSnapOpen) {
+    btnSnapOpen.addEventListener('click', () => {
+      if (!APP.esp32Ok) {
+        showToast('ESP32 offline, cannot calibrate', 'error');
+        return;
+      }
+      const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+      FINGERS.forEach(f => {
+        const rawVal = Math.round(APP.flexRaw[f]);
+        APP.flexLimits[f].min = rawVal;
+        const minEl = document.getElementById(`limit-flex-${f}-min`);
+        if (minEl) minEl.value = rawVal;
+      });
+      localStorage.setItem('glove_flex_limits', JSON.stringify(APP.flexLimits));
+      showToast('Open limits snapshot saved!', 'success');
+    });
+  }
+
+  if (btnSnapBent) {
+    btnSnapBent.addEventListener('click', () => {
+      if (!APP.esp32Ok) {
+        showToast('ESP32 offline, cannot calibrate', 'error');
+        return;
+      }
+      const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+      FINGERS.forEach(f => {
+        const rawVal = Math.round(APP.flexRaw[f]);
+        APP.flexLimits[f].max = rawVal;
+        const maxEl = document.getElementById(`limit-flex-${f}-max`);
+        if (maxEl) maxEl.value = rawVal;
+      });
+      localStorage.setItem('glove_flex_limits', JSON.stringify(APP.flexLimits));
+      showToast('Bent limits snapshot saved!', 'success');
     });
   }
 }

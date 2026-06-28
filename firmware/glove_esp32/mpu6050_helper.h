@@ -14,6 +14,7 @@
 #define MPU6050_PWR_MGMT_1   0x6B
 #define MPU6050_WHO_AM_I     0x75
 #define MPU6050_DATA_START   0x43 // GYRO_XOUT_H
+#define MPU6050_ACCEL_START  0x3B // ACCEL_XOUT_H
 
 #define GYRO_SCALE           65.5f
 
@@ -79,24 +80,34 @@ public:
   void update() {
     bool success = false;
 
-    // Read 6 bytes starting from GYRO_XOUT_H (0x43)
+    // Read 14 bytes starting from ACCEL_XOUT_H (0x3B)
     Wire.beginTransmission(MPU6050_ADDR);
-    Wire.write(MPU6050_DATA_START);
+    Wire.write(MPU6050_ACCEL_START);
     if (Wire.endTransmission(false) == 0) {
-      Wire.requestFrom(MPU6050_ADDR, 6, true);
+      Wire.requestFrom(MPU6050_ADDR, 14, true);
 
-      if (Wire.available() == 6) {
+      if (Wire.available() == 14) {
         // Retrieve values (MSB first, then LSB)
+        int16_t raw_ax = (Wire.read() << 8) | Wire.read();
+        int16_t raw_ay = (Wire.read() << 8) | Wire.read();
+        int16_t raw_az = (Wire.read() << 8) | Wire.read();
+        int16_t raw_temp = (Wire.read() << 8) | Wire.read(); // Read and discard temp
         int16_t raw_gx = (Wire.read() << 8) | Wire.read();
         int16_t raw_gy = (Wire.read() << 8) | Wire.read();
         int16_t raw_gz = (Wire.read() << 8) | Wire.read();
 
-        // Convert to physical units (deg/s)
+        // Convert accelerometer to physical units (g)
+        // AFS_SEL = 1 is configured (range +/- 4g), which has sensitivity 8192 LSB/g
+        accelX = raw_ax / 8192.0f;
+        accelY = raw_ay / 8192.0f;
+        accelZ = raw_az / 8192.0f;
+
+        // Convert gyroscope to physical units (deg/s)
         gyroX = raw_gx / GYRO_SCALE;
         gyroY = raw_gy / GYRO_SCALE;
         gyroZ = raw_gz / GYRO_SCALE;
 
-        // Perform dead-reckoning integration on the ESP32
+        // Perform sensor fusion / integration on the ESP32
         integrateOrientation();
         success = true;
         _consecutiveFailures = 0;
@@ -133,6 +144,40 @@ public:
     Serial.println("[IMU] ESP32-side orientation integration reset.");
   }
 
+  void calibrateOffsets() {
+    Serial.println("[IMU] Calibrating gyroscope — keep glove STILL for 2s...");
+    float sumX = 0, sumY = 0, sumZ = 0;
+    int targetSamples = 200;
+    int validSamples = 0;
+    
+    for (int i = 0; i < targetSamples; i++) {
+      Wire.beginTransmission(MPU6050_ADDR);
+      Wire.write(MPU6050_DATA_START);
+      if (Wire.endTransmission(false) == 0) {
+        Wire.requestFrom(MPU6050_ADDR, 6, true);
+        if (Wire.available() == 6) {
+          int16_t raw_gx = (Wire.read() << 8) | Wire.read();
+          int16_t raw_gy = (Wire.read() << 8) | Wire.read();
+          int16_t raw_gz = (Wire.read() << 8) | Wire.read();
+          
+          sumX += raw_gx / GYRO_SCALE;
+          sumY += raw_gy / GYRO_SCALE;
+          sumZ += raw_gz / GYRO_SCALE;
+          validSamples++;
+        }
+      }
+      delay(10);
+    }
+    
+    if (validSamples > 0) {
+      _biasX = sumX / validSamples;
+      _biasY = sumY / validSamples;
+      _biasZ = sumZ / validSamples;
+    }
+    
+    Serial.printf("[IMU] Gyro biases (from %d samples): X=%.2f, Y=%.2f, Z=%.2f\n", validSamples, _biasX, _biasY, _biasZ);
+  }
+
 private:
   unsigned long _lastTime = 0;
   int _sda = 17;
@@ -151,36 +196,6 @@ private:
     return (Wire.endTransmission() == 0);
   }
 
-  void calibrateOffsets() {
-    Serial.println("[IMU] Calibrating gyroscope — keep glove STILL for 2s...");
-    float sumX = 0, sumY = 0, sumZ = 0;
-    int samples = 200;
-    
-    for (int i = 0; i < samples; i++) {
-      Wire.beginTransmission(MPU6050_ADDR);
-      Wire.write(MPU6050_DATA_START);
-      if (Wire.endTransmission(false) == 0) {
-        Wire.requestFrom(MPU6050_ADDR, 6, true);
-        if (Wire.available() == 6) {
-          int16_t raw_gx = (Wire.read() << 8) | Wire.read();
-          int16_t raw_gy = (Wire.read() << 8) | Wire.read();
-          int16_t raw_gz = (Wire.read() << 8) | Wire.read();
-          
-          sumX += raw_gx / GYRO_SCALE;
-          sumY += raw_gy / GYRO_SCALE;
-          sumZ += raw_gz / GYRO_SCALE;
-        }
-      }
-      delay(10);
-    }
-    
-    _biasX = sumX / samples;
-    _biasY = sumY / samples;
-    _biasZ = sumZ / samples;
-    
-    Serial.printf("[IMU] Gyro biases: X=%.2f, Y=%.2f, Z=%.2f\n", _biasX, _biasY, _biasZ);
-  }
-
   void integrateOrientation() {
     unsigned long now = millis();
     float dt = (now - _lastTime) / 1000.0f;
@@ -195,7 +210,7 @@ private:
     float gz_cal = gyroZ - _biasZ;
 
     // Apply noise gate / deadband to filter out micro-drift when stationary
-    const float DEADBAND = 0.4f;
+    const float DEADBAND = 0.8f;
     float clean_gx = (fabs(gx_cal) < DEADBAND) ? 0.0f : gx_cal;
     float clean_gy = (fabs(gy_cal) < DEADBAND) ? 0.0f : gy_cal;
     float clean_gz = (fabs(gz_cal) < DEADBAND) ? 0.0f : gz_cal;
@@ -208,9 +223,32 @@ private:
     float logical_gy = clean_gy;
     float logical_gz = -clean_gz;
 
-    // Accumulate orientation (pure dead-reckoning)
-    roll  += logical_gx * dt;
-    pitch += logical_gy * dt;
-    yaw   += logical_gz * dt;
+    // Calculate pitch and roll angles from the accelerometer (in degrees)
+    float accelPitch = atan2(-accelX, sqrt(accelY * accelY + accelZ * accelZ)) * 57.29578f;
+    float accelRoll  = atan2(accelY, accelZ) * 57.29578f;
+
+    // Apply remapped signs to accelerometer reference:
+    // since logical_gy = clean_gy, logical pitch is normal
+    float targetPitch = accelPitch;
+    // since logical_gx = -clean_gx, logical roll is inverted
+    float targetRoll = -accelRoll;
+
+    // Calculate total acceleration magnitude (in g)
+    float forceMagnitude = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+
+    // Complementary Filter: 98% Gyro, 2% Accelerometer.
+    // Only apply accelerometer reference when the sensor is relatively static (magnitude near 1.0g)
+    // to prevent dynamic motion acceleration from corrupting the tilt calculation.
+    if (forceMagnitude > 0.5f && forceMagnitude < 1.5f) {
+      pitch = 0.98f * (pitch + logical_gy * dt) + 0.02f * targetPitch;
+      roll  = 0.98f * (roll + logical_gx * dt) + 0.02f * targetRoll;
+    } else {
+      pitch += logical_gy * dt;
+      roll  += logical_gx * dt;
+    }
+
+    // Yaw cannot be corrected with accelerometer (requires magnetometer).
+    // We integrate it directly.
+    yaw += logical_gz * dt;
   }
 };

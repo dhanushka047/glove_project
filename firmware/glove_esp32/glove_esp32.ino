@@ -17,7 +17,24 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+
+// Uncomment the one matching your display driver
+#define USE_SH110X      // For 1.3" OLEDs
+//#define USE_SSD1306   // For 0.96" OLEDs
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define I2C_ADDRESS 0x3C
+
+#ifdef USE_SH110X
+#include <Adafruit_SH110X.h>
+#endif
+
+#ifdef USE_SSD1306
+#include <Adafruit_SSD1306.h>
+#endif
+
 #include <WiFiUdp.h>
 #include "mpu6050_helper.h"
 
@@ -81,7 +98,17 @@ struct CalibSample {
 // ═══════════════════════════════════════════════════════════════
 WebSocketsClient wsClient;
 MPU6050Helper    imu;
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+#ifdef USE_SH110X
+#define OLED_WHITE SH110X_WHITE
+#define OLED_BLACK SH110X_BLACK
+Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#endif
+
+#ifdef USE_SSD1306
+#define OLED_WHITE SSD1306_WHITE
+#define OLED_BLACK SSD1306_BLACK
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#endif
 
 SignRecord   signLib[MAX_SIGNS];
 int          signCount      = 0;
@@ -307,16 +334,31 @@ void sendLibraryDump() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ▶  LCD Display Helper
+// ▶  OLED Display Helper
 // ═══════════════════════════════════════════════════════════════
-void updateLcdStatus(const char* l0, const char* l1, const char* l2, const char* l3) {
+void updateOledStatus(const char* l0, const char* l1, const char* l2, const char* l3) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(OLED_WHITE);
+
   const char* lines[4] = {l0, l1, l2, l3};
   for (int i = 0; i < 4; i++) {
-    lcd.setCursor(0, i);
-    char buffer[21];
-    snprintf(buffer, sizeof(buffer), "%-20s", lines[i] ? lines[i] : "");
-    lcd.print(buffer);
+    if (!lines[i]) continue;
+
+    String s = String(lines[i]);
+    s.replace("✓", "[OK]");
+    s.replace("✗", "[X]");
+
+    // Left-aligned at 4px margin centers a 20-character line (20 * 6 = 120px) on 128px screen
+    display.setCursor(4, 4 + i * 14);
+    display.print(s.c_str());
   }
+
+  // Draw separation line under the header line if it is set and not empty
+  if (l0 && strlen(l0) > 0) {
+    display.drawFastHLine(0, 13, SCREEN_WIDTH, OLED_WHITE);
+  }
+  display.display();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -335,7 +377,7 @@ void processCommand(JsonDocument& doc) {
       calibActive = true;
       Serial.printf("[CALIB] Recording: %s\n", calibLabel);
       wsSend("{\"type\":\"calib_started\"}");
-      updateLcdStatus("Calibration Mode", "Hold position for:", lbl, "Recording...");
+      updateOledStatus("Calibration Mode", "Hold position for:", lbl, "Recording...");
     }
   }
 
@@ -343,7 +385,7 @@ void processCommand(JsonDocument& doc) {
   else if (strcmp(type, "stop_recording") == 0) {
     calibActive = false;
     Serial.println("[CALIB] Stopped");
-    updateLcdStatus("Calibration Done", "Processing...", "", "");
+    updateOledStatus("Calibration Done", "Processing...", "", "");
   }
 
   // ── save_sign  (browser already computed averages) ───────
@@ -416,18 +458,21 @@ void processCommand(JsonDocument& doc) {
     wsSend("{\"type\":\"yaw_reset\"}");
   }
 
+  // ── calibrate_gyro ───────────────────────────────────────
+  else if (strcmp(type, "calibrate_gyro") == 0) {
+    imu.calibrateOffsets();
+    imu.resetYaw();
+    wsSend("{\"type\":\"gyro_calibrated\"}");
+  }
+
   // ── update_lcd ───────────────────────────────────────────
   else if (strcmp(type, "update_lcd") == 0) {
     JsonArray lines = doc["lines"].as<JsonArray>();
-    for (int i = 0; i < 4 && i < (int)lines.size(); i++) {
-      lcd.setCursor(0, i);
-      const char* txt = lines[i];
-      if (txt) {
-        char buffer[21];
-        snprintf(buffer, sizeof(buffer), "%-20s", txt);
-        lcd.print(buffer);
-      }
-    }
+    const char* l0 = lines[0] | "";
+    const char* l1 = lines[1] | "";
+    const char* l2 = lines[2] | "";
+    const char* l3 = lines[3] | "";
+    updateOledStatus(l0, l1, l2, l3);
   }
 }
 
@@ -441,13 +486,13 @@ void onWebSocketEvent(WStype_t eventType, uint8_t* payload, size_t length) {
       wsConnected = true;
       // Identify role
       wsClient.sendTXT("{\"type\":\"identify\",\"role\":\"esp32\"}");
-      updateLcdStatus("WS Connected ✓", "Ready for gestures", "", "");
+      updateOledStatus("WS Connected [OK]", "Ready for gestures", "", "");
       break;
 
     case WStype_DISCONNECTED:
       Serial.println("[WS] Disconnected — retrying in 3s...");
       wsConnected = false;
-      updateLcdStatus("WS DISCONNECTED ✗", "Check start.sh / IP", "AP: FC_Project_v1", "IP: 192.168.4.1");
+      updateOledStatus("WS DISCONNECTED [X]", "Check start.sh / IP", "AP: FC_Project_v1", "IP: 192.168.4.1");
       break;
 
     case WStype_TEXT: {
@@ -459,7 +504,7 @@ void onWebSocketEvent(WStype_t eventType, uint8_t* payload, size_t length) {
 
     case WStype_ERROR:
       Serial.println("[WS] Error");
-      updateLcdStatus("WS ERROR ✗", "WebSocket error", "", "");
+      updateOledStatus("WS ERROR [X]", "WebSocket error", "", "");
       break;
 
     default: break;
@@ -567,27 +612,26 @@ void setup() {
   }
   loadLibrary();
 
-  // I2C + MPU6050 + LCD
+  // I2C + MPU6050 + OLED
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(400000);   // 400 kHz fast mode
 
-  // LCD setup
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Glove Init...");
-  lcd.setCursor(0, 1);
-  lcd.print("AP: FC_Project_v1");
-  lcd.setCursor(0, 2);
-  lcd.print("IP: 192.168.4.1");
-  lcd.setCursor(0, 3);
-  lcd.print("WS: Connecting...");
+  // OLED setup
+  #ifdef USE_SH110X
+  display.begin(I2C_ADDRESS, true);
+  #endif
+  #ifdef USE_SSD1306
+  display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDRESS);
+  #endif
+
+  display.clearDisplay();
+  display.display();
+
+  updateOledStatus("Glove Init...", "AP: FC_Project_v1", "IP: 192.168.4.1", "WS: Connecting...");
 
   if (!imu.begin(PIN_SDA, PIN_SCL)) {
     Serial.println("[IMU] !! MPU6050 FAILED — check SDA=17 SCL=18 !!");
-    lcd.setCursor(0, 0);
-    lcd.print("IMU FAILED! check i2c");
+    updateOledStatus("IMU FAILED!", "check i2c connections", "SDA: 17, SCL: 18", "");
   }
 
   // ADC: 12-bit, 11dB (0–3.6V range)
@@ -660,21 +704,26 @@ void loop() {
             wsClient.disconnect();
             wsClient.begin(discoveredHost.c_str(), discoveredPort, "/");
             
-            // Update LCD
+            // Update OLED
             char ipLine[21];
             snprintf(ipLine, sizeof(ipLine), "Srv: %s:%d", discoveredHost.c_str(), discoveredPort);
-            updateLcdStatus("Server Discovered!", ipLine, "Connecting...", "");
+            updateOledStatus("Server Discovered!", ipLine, "Connecting...", "");
           }
         }
       }
     }
   }
 
-  imu.update();         // must run every cycle — complementary filter accuracy
+  unsigned long now = millis();
+
+  static unsigned long lastImuTime = 0;
+  if (now - lastImuTime >= 10) { // 100 Hz (10ms)
+    lastImuTime = now;
+    imu.update();
+  }
+
   wsClient.loop();
   handleButton();
-
-  unsigned long now = millis();
 
   // Read sensors at 50 Hz
   if (now - lastSensorTime >= SENSOR_PERIOD_MS) {
@@ -696,10 +745,11 @@ void loop() {
     lastDebug = now;
     tick = (tick + 1) % 4;
     const char* spinner = (tick==0)?"-":(tick==1)?"\\":(tick==2)?"|":"/";
-    Serial.printf("[%s] P=%6.1f R=%6.1f Y=%6.1f | Ax=%5.2f Ay=%5.2f Az=%5.2f | WS:%s\n",
+    Serial.printf("[%s] P=%6.1f R=%6.1f Y=%6.1f | Ax=%5.2f Ay=%5.2f Az=%5.2f | Flex: T=%.0f I=%.0f M=%.0f R=%.0f P=%.0f | WS:%s\n",
       spinner,
       curPitch, curRoll, curYaw,
       imu.accelX, imu.accelY, imu.accelZ,
+      curFlex[0], curFlex[1], curFlex[2], curFlex[3], curFlex[4],
       wsConnected ? "OK" : "X");
   }
 }
