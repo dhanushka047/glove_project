@@ -227,6 +227,13 @@
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
               <h3 style="margin: 0;">Flex Sensor Mappings</h3>
               <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 6px; margin-right: 8px;">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Raw Mode</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="flex-raw-mode-toggle-settings">
+                    <span class="slider"></span>
+                  </label>
+                </div>
                 <button id="btn-flex-reset-limits" class="btn btn-tiny" title="Reset all min/max limits to defaults" style="font-size: 10px; padding: 3px 8px; opacity: 0.7;">RESET</button>
                 <button id="btn-flex-auto-detect" class="btn btn-tiny" style="font-size: 10px; padding: 3px 10px; display: flex; align-items: center; gap: 5px; transition: all 0.3s ease;">
                   <span id="auto-detect-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #666; display: inline-block; transition: background 0.3s;"></span>
@@ -422,6 +429,13 @@
         <div class="glass-card flex-card">
           <div class="card-header">
             <h2 class="card-title">Flex Sensors</h2>
+            <div style="display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 12px;">
+              <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Raw Mode</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="flex-raw-mode-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
             <span class="card-chip">5-finger</span>
           </div>
           <div class="flex-bars" id="flex-bars" role="group" aria-label="Flex sensor readings"></div>

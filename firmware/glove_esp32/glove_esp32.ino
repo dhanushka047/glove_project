@@ -52,11 +52,11 @@ const int   SERVER_PORT = 3001;
 // ▶  Pin Definitions
 // ═══════════════════════════════════════════════════════════════
 // Flex sensor ADC pins (ESP32-S3 uses GPIO numbers)
-#define PIN_FLEX_THUMB   A1   // GPIO1
-#define PIN_FLEX_INDEX   A3   // GPIO3
-#define PIN_FLEX_MIDDLE  A5   // GPIO5
-#define PIN_FLEX_RING    A7   // GPIO7
-#define PIN_FLEX_PINKY   A2   // GPIO2
+#define PIN_FLEX_THUMB   2   // GPIO2
+#define PIN_FLEX_INDEX   4   // GPIO4
+#define PIN_FLEX_MIDDLE  12  // GPIO12
+#define PIN_FLEX_RING    14  // GPIO14
+#define PIN_FLEX_PINKY   3   // GPIO3
 
 // MPU6050 and LCD I2C
 #define PIN_SDA          17
@@ -64,6 +64,10 @@ const int   SERVER_PORT = 3001;
 
 // Button (boot button — LOW when pressed)
 #define PIN_BUTTON       0
+
+// Motor MOSFET (P-channel active-LOW)
+#define PIN_MOTOR        6
+#define MOTOR_ACTIVE_LOW true
 
 // ═══════════════════════════════════════════════════════════════
 // ▶  Constants
@@ -133,6 +137,37 @@ unsigned long btnPressTime  = 0;
 
 // WS state
 bool         wsConnected    = false;
+
+// Motor control variables
+bool          motorOn        = false;
+unsigned long motorOffTime   = 0;
+int           lastDetectedSignIdx = -2; // Start with -2 to signify uninitialized/none
+
+void setMotor(bool turnOn) {
+  motorOn = turnOn;
+  if (MOTOR_ACTIVE_LOW) {
+    digitalWrite(PIN_MOTOR, turnOn ? LOW : HIGH);
+  } else {
+    digitalWrite(PIN_MOTOR, turnOn ? HIGH : LOW);
+  }
+}
+
+void triggerHaptic(unsigned long durationMs) {
+  if (durationMs == 0) {
+    setMotor(false);
+    motorOffTime = 0;
+    return;
+  }
+  setMotor(true);
+  motorOffTime = millis() + durationMs;
+}
+
+void updateMotorPulse() {
+  if (motorOffTime > 0 && millis() >= motorOffTime) {
+    setMotor(false);
+    motorOffTime = 0;
+  }
+}
 
 // UDP Discovery Globals
 WiFiUDP      udp;
@@ -307,8 +342,16 @@ void sendSensorData() {
   doc["roll"]  = curRoll;
   doc["yaw"]   = curYaw;
   int det = detectSign(curFlex, curPitch, curRoll, curYaw);
-  if (det >= 0) doc["detected"] = signLib[det].label;
-  else           doc["detected"] = nullptr;
+  if (det >= 0) {
+    doc["detected"] = signLib[det].label;
+    if (det != lastDetectedSignIdx) {
+      triggerHaptic(150); // Buzz for 150ms on new gesture detection
+    }
+  } else {
+    doc["detected"] = nullptr;
+  }
+  lastDetectedSignIdx = det;
+  
   String out; serializeJson(doc, out);
   wsClient.sendTXT(out);
 }
@@ -474,6 +517,21 @@ void processCommand(JsonDocument& doc) {
     const char* l3 = lines[3] | "";
     updateOledStatus(l0, l1, l2, l3);
   }
+
+  // ── trigger_motor ────────────────────────────────────────
+  else if (strcmp(type, "trigger_motor") == 0) {
+    unsigned long duration = doc["duration"] | 200;
+    triggerHaptic(duration);
+    Serial.printf("[MOTOR] Remote trigger: %ld ms\n", duration);
+  }
+
+  // ── set_motor ────────────────────────────────────────────
+  else if (strcmp(type, "set_motor") == 0) {
+    bool state = doc["state"] | false;
+    setMotor(state);
+    motorOffTime = 0; // Cancel any active pulse timer
+    Serial.printf("[MOTOR] Remote state: %s\n", state ? "ON" : "OFF");
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -581,11 +639,13 @@ void handleButton() {
     if (held > 50 && held < 1500) {
       // Short press: reset yaw
       imu.resetYaw();
+      triggerHaptic(100); // 100ms haptic feedback on yaw reset
       Serial.println("[BTN] Short press — yaw reset");
       wsSend("{\"type\":\"yaw_reset\"}");
     } else if (held >= 1500) {
       // Long press: clear library
       Serial.println("[BTN] Long press — clearing library!");
+      triggerHaptic(500); // 500ms haptic feedback on library clear
       signCount = 0;
       LittleFS.remove(SIGNS_FILE);
       wsSend("{\"type\":\"library_cleared\"}");
@@ -603,6 +663,10 @@ void setup() {
   Serial.println("\n╔══════════════════════════════╗");
   Serial.println("║  Sign Language Glove v1.0    ║");
   Serial.println("╚══════════════════════════════╝");
+
+  // Configure Motor Pin (P-channel MOSFET needs HIGH to be OFF initially)
+  pinMode(PIN_MOTOR, OUTPUT);
+  setMotor(false);
 
   // LittleFS
   if (!LittleFS.begin(true)) {
@@ -635,7 +699,15 @@ void setup() {
   }
 
   // ADC: 12-bit, 11dB (0–3.6V range)
+  analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
+
+  // Flex Sensors
+  pinMode(PIN_FLEX_THUMB, INPUT);
+  pinMode(PIN_FLEX_INDEX, INPUT);
+  pinMode(PIN_FLEX_MIDDLE, INPUT);
+  pinMode(PIN_FLEX_RING, INPUT);
+  pinMode(PIN_FLEX_PINKY, INPUT);
 
   // Button
   pinMode(PIN_BUTTON, INPUT_PULLUP);
@@ -679,6 +751,8 @@ void setup() {
 // ▶  loop()
 // ═══════════════════════════════════════════════════════════════
 void loop() {
+  updateMotorPulse();
+
   // Check UDP broadcast for server discovery (only when not connected to WS)
   if (!wsConnected) {
     int packetSize = udp.parsePacket();

@@ -11,6 +11,7 @@
 const APP = {
   // Connection
   ws      : null,
+  flexRawMode: false,
   wsUrl   : (() => {
     const saved = localStorage.getItem('glove_ws_url');
     try {
@@ -1229,8 +1230,36 @@ function updateFlexBars(id, flex) {
   flex.forEach((v, i) => {
     const fill = document.getElementById(`${id}-fill-${i}`);
     const val  = document.getElementById(`${id}-val-${i}`);
-    if (fill) fill.style.width = v.toFixed(1) + '%';
-    if (val)  val.textContent = Math.round(v) + '%';
+    if (fill) {
+      if (APP.flexRawMode) {
+        const rawArray = [
+          APP.flexRaw.thumb,
+          APP.flexRaw.index,
+          APP.flexRaw.middle,
+          APP.flexRaw.ring,
+          APP.flexRaw.pinky
+        ];
+        const rawVal = rawArray[i] ?? 0;
+        const pct = (rawVal / 4095) * 100;
+        fill.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + '%';
+      } else {
+        fill.style.width = v.toFixed(1) + '%';
+      }
+    }
+    if (val) {
+      if (APP.flexRawMode) {
+        const rawArray = [
+          APP.flexRaw.thumb,
+          APP.flexRaw.index,
+          APP.flexRaw.middle,
+          APP.flexRaw.ring,
+          APP.flexRaw.pinky
+        ];
+        val.textContent = Math.round(rawArray[i] ?? 0);
+      } else {
+        val.textContent = Math.round(v) + '%';
+      }
+    }
   });
 }
 
@@ -1869,6 +1898,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize Edit Sign Modal
   initEditSignModal();
+
+  // Flex raw mode toggle synchronization
+  const rawToggleDash = document.getElementById('flex-raw-mode-toggle');
+  const rawToggleSet = document.getElementById('flex-raw-mode-toggle-settings');
+
+  const syncRawToggles = (isRaw) => {
+    APP.flexRawMode = isRaw;
+    if (rawToggleDash && rawToggleDash.checked !== isRaw) rawToggleDash.checked = isRaw;
+    if (rawToggleSet && rawToggleSet.checked !== isRaw) rawToggleSet.checked = isRaw;
+    
+    // Force immediate update of flex bars to show raw/percentage values
+    updateFlexBars('flex-bars', APP.flex);
+    updateFlexBars('test-flex-bars', APP.flex);
+    updateFlexBars('mini-flex-bars', APP.flex);
+  };
+
+  if (rawToggleDash) {
+    rawToggleDash.addEventListener('change', e => syncRawToggles(e.target.checked));
+  }
+  if (rawToggleSet) {
+    rawToggleSet.addEventListener('change', e => syncRawToggles(e.target.checked));
+  }
 
   console.log('%c🧤 SignGlove Dashboard Ready', 'color:#7c5cfc;font-size:16px;font-weight:bold;');
 });
