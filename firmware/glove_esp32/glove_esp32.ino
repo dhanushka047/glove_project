@@ -65,7 +65,7 @@ const int   SERVER_PORT = 3001;
 // Button (boot button — LOW when pressed)
 #define PIN_BUTTON       0
 
-// Motor MOSFET (P-channel active-LOW)
+// Motor MOSFET (P-channel active-LOW by default)
 #define PIN_MOTOR        6
 #define MOTOR_ACTIVE_LOW true
 
@@ -345,7 +345,7 @@ void sendSensorData() {
   if (det >= 0) {
     doc["detected"] = signLib[det].label;
     if (det != lastDetectedSignIdx) {
-      triggerHaptic(150); // Buzz for 150ms on new gesture detection
+      triggerHaptic(500); // Buzz for 500ms (0.5s) on new gesture detection
     }
   } else {
     doc["detected"] = nullptr;

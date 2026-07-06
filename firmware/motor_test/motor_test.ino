@@ -120,8 +120,10 @@ void setup() {
   Serial.println("=========================================");
   Serial.println("   ESP32-S3 MOSFET Motor 3s Cycle Test   ");
   Serial.println("=========================================");
-  Serial.println("MOSFET Pin : GPIO 6");
-  Serial.printf( "MOSFET Type: %s (P-Channel / Active-LOW)\n", MOTOR_ACTIVE_LOW ? "P-CH" : "N-CH");
+  Serial.printf( "MOSFET Pin : GPIO %d\n", PIN_MOTOR);
+  Serial.printf( "MOSFET Type: %s (%s)\n", 
+                 MOTOR_ACTIVE_LOW ? "P-CH" : "N-CH",
+                 MOTOR_ACTIVE_LOW ? "Active-LOW / P-Channel" : "Active-HIGH / N-Channel");
   Serial.println("OLED SDA   : GPIO 17");
   Serial.println("OLED SCL   : GPIO 18");
   Serial.println("Cycle      : 3s ON / 3s OFF repeating");

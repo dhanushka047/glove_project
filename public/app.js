@@ -1430,6 +1430,96 @@ function initCalibration() {
     });
   }
 
+  // Custom quick pick words
+  const customWordsGrid = document.getElementById('custom-words-quick-grid');
+  const customWordsInput = document.getElementById('calib-custom-word-input');
+  const addCustomWordBtn = document.getElementById('btn-add-custom-word');
+
+  let customWords = [];
+  try {
+    const saved = localStorage.getItem('glove_custom_words');
+    customWords = saved ? JSON.parse(saved) : ['HELLO', 'HELP', 'YES', 'NO', 'THANK_YOU', 'PLEASE'];
+  } catch (e) {
+    customWords = ['HELLO', 'HELP', 'YES', 'NO', 'THANK_YOU', 'PLEASE'];
+  }
+
+  const renderCustomWords = () => {
+    if (!customWordsGrid) return;
+    customWordsGrid.innerHTML = '';
+    customWords.forEach(word => {
+      const btn = document.createElement('button');
+      btn.className = 'quick-btn';
+      btn.style.width = 'auto';
+      btn.style.padding = '0 12px';
+      btn.textContent = word;
+      btn.title = `Click to record "${word}" (Double-click to remove)`;
+      btn.onclick = () => {
+        document.getElementById('calib-label-input').value = word;
+        document.getElementById('calib-label-input').focus();
+      };
+      btn.ondblclick = (e) => {
+        e.preventDefault();
+        customWords = customWords.filter(w => w !== word);
+        localStorage.setItem('glove_custom_words', JSON.stringify(customWords));
+        renderCustomWords();
+        showToast(`Removed "${word}" from quick pick list`, 'warning');
+      };
+      customWordsGrid.appendChild(btn);
+    });
+  };
+
+  if (customWordsGrid) {
+    renderCustomWords();
+  }
+
+  const addCustomWord = () => {
+    if (!customWordsInput) return;
+    const rawVal = customWordsInput.value.trim().toUpperCase();
+    if (!rawVal) return;
+
+    // Support comma or space separated bulk import
+    const wordsToAdd = rawVal.split(/[\s,]+/);
+    let addedCount = 0;
+
+    wordsToAdd.forEach(word => {
+      if (!word) return;
+      // Validate word: alphanumeric/underscore, max 15 chars
+      if (word.length > 15) {
+        showToast(`"${word}" exceeds 15 char limit`, 'error');
+        return;
+      }
+      if (!/^[A-Z0-9_]+$/.test(word)) {
+        showToast(`"${word}" contains invalid characters (use A-Z, 0-9, or _)`, 'error');
+        return;
+      }
+      if (!customWords.includes(word)) {
+        customWords.push(word);
+        addedCount++;
+      }
+    });
+
+    if (addedCount > 0) {
+      localStorage.setItem('glove_custom_words', JSON.stringify(customWords));
+      renderCustomWords();
+      showToast(`Added ${addedCount} word(s) to quick pick list`, 'success');
+    } else {
+      showToast('No new words added', 'info');
+    }
+    customWordsInput.value = '';
+  };
+
+  if (addCustomWordBtn) {
+    addCustomWordBtn.onclick = addCustomWord;
+  }
+  if (customWordsInput) {
+    customWordsInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addCustomWord();
+      }
+    });
+  }
+
   document.getElementById('calib-start-btn').onclick  = startCalib;
   document.getElementById('calib-label-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') startCalib();
@@ -2253,9 +2343,14 @@ function handleTypingFrame() {
     stateLabel.className = 'typing-status' + (APP.typing.isPaused ? ' paused' : '');
   }
 
+  // If paused, only allow 'hold' / 'detection hold' gestures to process (so we can unpause)
   if (APP.typing.isPaused) {
-    if (progressContainer) progressContainer.classList.remove('show');
-    return;
+    if (!APP.detected || (APP.detected.toLowerCase() !== 'hold' && APP.detected.toLowerCase() !== 'detection hold')) {
+      APP.typing.activeGesture = null;
+      APP.typing.holdStart = 0;
+      if (progressContainer) progressContainer.classList.remove('show');
+      return;
+    }
   }
 
   // Handle gesture cooldown
@@ -2315,6 +2410,9 @@ function handleTypingFrame() {
         insertChar(APP.detected);
         showToast(`Gesture: Typed "${APP.detected}"`, 'success');
       }
+
+      // Trigger motor haptic buzz (150ms) on successful gesture registration!
+      sendWS({ type: 'trigger_motor', duration: 150 });
 
       // Start cooldown
       APP.typing.cooldownEnd = Date.now() + (APP.typing.cooldownDuration * 1000);
